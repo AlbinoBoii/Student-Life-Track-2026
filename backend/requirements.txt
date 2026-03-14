@@ -3,3 +3,4 @@ uvicorn[standard]
 pydantic
 pyarrow
 pandas
+psycopg[binary]
