@@ -30,6 +30,7 @@ struct AzureSample {
   uint64_t ts_ms;
   int16_t ax, ay, az;
   float   motion;
+  float   motion_avg;
   const char* state;
   int     rssi;
 };
@@ -81,6 +82,7 @@ void bufferSampleForAzure() {
   sampleBuf[bufCount].ay     = s.ay;
   sampleBuf[bufCount].az     = s.az;
   sampleBuf[bufCount].motion = s.motion;
+  sampleBuf[bufCount].motion_avg = s.motion_avg;
   sampleBuf[bufCount].state  = washerStateName();
   sampleBuf[bufCount].rssi   = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : 0;
 
@@ -107,6 +109,13 @@ void flushAzureBatch() {
     bufCount = 0;
     return;
   }
+  
+  if (bufCount > 0) {
+    Serial.print("[Azure] Preparing to flush. bufCount: ");
+    Serial.print(bufCount);
+    Serial.print(" Timer Elapsed: ");
+    Serial.println(timerElapsed ? "Yes" : "No");
+  }
 
   // Build JSON
   String json = "{\"device_id\":\"";
@@ -131,6 +140,8 @@ void flushAzureBatch() {
     json += String(sampleBuf[i].az);
     json += ",\"motion_score\":";
     json += String(sampleBuf[i].motion, 2);
+    json += ",\"motion_avg\":";
+    json += String(sampleBuf[i].motion_avg, 2);
     json += ",\"state\":\"";
     json += sampleBuf[i].state;
     json += "\",\"wifi_rssi_dbm\":";

@@ -7,6 +7,7 @@ struct SensorSample {
   int16_t ay;
   int16_t az;
   float motion;
+  float motion_avg;
 };
 
 void setupMPU();

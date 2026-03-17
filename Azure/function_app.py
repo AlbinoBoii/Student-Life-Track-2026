@@ -15,7 +15,7 @@ import os
 from datetime import datetime, timezone
 
 import azure.functions as func
-from azure.data.tables import TableServiceClient
+from azure.data.tables import TableServiceClient, EdmType, EntityProperty
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -89,11 +89,12 @@ def ingest(req: func.HttpRequest) -> func.HttpResponse:
             "RowKey": row_key,
             "boot_id": boot_id,
             "seq_no": seq_no,
-            "ts_ms": ts_ms,
+            "ts_ms": EntityProperty(int(ts_ms), EdmType.INT64),
             "ax": s.get("ax", 0),
             "ay": s.get("ay", 0),
             "az": s.get("az", 0),
             "motion_score": float(s.get("motion_score", 0)),
+            "motion_avg": float(s.get("motion_avg", 0)),
             "state": s.get("state", ""),
             "wifi_rssi_dbm": s.get("wifi_rssi_dbm"),
             "received_at": now_iso,
@@ -159,27 +160,31 @@ def samples(req: func.HttpRequest) -> func.HttpResponse:
     table = _get_table_client()
 
     if odata_filter:
-        entity_iter = table.query_entities(odata_filter, results_per_page=limit)
+        entities = list(table.query_entities(odata_filter))
     else:
-        entity_iter = table.list_entities(results_per_page=limit)
+        entities = list(table.list_entities())
+
+    entities.sort(key=lambda x: x.get("received_at", ""), reverse=True)
+    entities = entities[:limit]
 
     rows = []
-    for entity in entity_iter:
+    for entity in entities:
+        raw_ts = entity.get("ts_ms", 0)
+        ts_ms = raw_ts.value if hasattr(raw_ts, "value") else raw_ts
         rows.append({
             "device_id": entity.get("PartitionKey", ""),
             "boot_id": entity.get("boot_id", ""),
             "seq_no": entity.get("seq_no", 0),
-            "ts_ms": entity.get("ts_ms", 0),
+            "ts_ms": ts_ms,
             "ax": entity.get("ax", 0),
             "ay": entity.get("ay", 0),
             "az": entity.get("az", 0),
             "motion_score": entity.get("motion_score", 0),
+            "motion_avg": entity.get("motion_avg", 0),
             "state": entity.get("state", ""),
             "wifi_rssi_dbm": entity.get("wifi_rssi_dbm"),
             "received_at": entity.get("received_at", ""),
         })
-        if len(rows) >= limit:
-            break
 
     # --- CSV ---
     if fmt == "csv":
@@ -273,6 +278,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <label>Limit</label>
     <input id="limit" type="number" value="1000" min="1" max="10000">
   </div>
+  <div class="field" style="flex-direction:row; align-items:center; gap:0.5rem; justify-content:center; padding-bottom:0.4rem;">
+    <input type="checkbox" id="showStateBg" checked onchange="loadData()">
+    <label style="margin:0; text-transform:none; font-size:0.85rem; cursor:pointer;" for="showStateBg">Show State Background</label>
+  </div>
   <button class="btn btn-primary" onclick="loadData()">Load Data</button>
   <button class="btn btn-secondary" onclick="downloadCSV()">⬇ Download CSV</button>
   <div class="spinner" id="spinner"></div>
@@ -304,8 +313,58 @@ function initCharts() {
 
   motionChart = new Chart(document.getElementById('chartMotion'),{
     type:'line',
-    data:{labels:[],datasets:[{label:'Motion Score',data:[],borderColor:'#38bdf8',backgroundColor:'rgba(56,189,248,.1)',fill:true,tension:.3,pointRadius:0}]},
-    options:{...shared}
+    data:{labels:[],datasets:[
+      {label:'Motion Score',data:[],borderColor:'#38bdf8',fill:false,tension:.3,pointRadius:0},
+      {label:'10s Avg Motion',data:[],borderColor:'#f59e0b',hidden:false,tension:.3,pointRadius:0}
+    ]},
+    options:{...shared},
+    plugins: [{
+      id: 'customStateBg',
+      beforeDraw: (chart) => {
+        const showBg = document.getElementById('showStateBg') && document.getElementById('showStateBg').checked;
+        if (!showBg) return;
+        if (!chart.data.labels || chart.data.labels.length === 0) return;
+        
+        const ctx = chart.canvas.getContext('2d');
+        const xAxis = chart.scales.x;
+        const yAxis = chart.scales.y;
+        const stateArray = chart.data.customStateArray;
+        if (!stateArray) return;
+        ctx.save();
+        let startIdx = 0;
+        let currentState = stateArray[0];
+        
+        const meta = chart.getDatasetMeta(0);
+        if (!meta.data || meta.data.length === 0) {
+            ctx.restore();
+            return;
+        }
+
+        for (let i = 1; i <= stateArray.length; i++) {
+          if (i === stateArray.length || stateArray[i] !== currentState) {
+            
+            let leftX = startIdx === 0 ? xAxis.left : meta.data[startIdx].x;
+            let rightX = i === stateArray.length ? xAxis.right : meta.data[i].x;
+
+            if (currentState === 'RUNNING') {
+              ctx.fillStyle = 'rgba(239, 68, 68, 0.15)'; 
+            } else if (currentState === 'IDLE') {
+              ctx.fillStyle = 'rgba(34, 197, 94, 0.15)'; 
+            } else {
+              ctx.fillStyle = 'transparent';
+            }
+            
+            ctx.fillRect(leftX, yAxis.top, rightX - leftX, yAxis.bottom - yAxis.top);
+
+            startIdx = i;
+            if (i < stateArray.length) {
+              currentState = stateArray[i];
+            }
+          }
+        }
+        ctx.restore();
+      }
+    }]
   });
 
   accelChart = new Chart(document.getElementById('chartAccel'),{
@@ -365,6 +424,7 @@ async function loadData() {
     }
 
     const rows = data.samples || [];
+    rows.reverse();
 
     st.textContent = rows.length + ' samples loaded @ ' + new Date().toLocaleTimeString();
 
@@ -380,9 +440,11 @@ async function loadData() {
     }
 
     // charts
-    const labels = rows.map(r=>r.ts_ms);
+    const labels = rows.map(r=> new Date(r.ts_ms).toLocaleTimeString());
     motionChart.data.labels = labels;
+    motionChart.data.customStateArray = rows.map(r=>r.state); // Custom array for plugin
     motionChart.data.datasets[0].data = rows.map(r=>r.motion_score);
+    motionChart.data.datasets[1].data = rows.map(r=>r.motion_avg || null);
     motionChart.update();
 
     accelChart.data.labels = labels;

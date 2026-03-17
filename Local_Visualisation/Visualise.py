@@ -9,9 +9,11 @@ def main():
     if len(sys.argv) > 1:
         target_files = sys.argv[1:]
     else:
-        log_files = glob.glob("washer_log_*.csv")
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        search_pattern = os.path.join(script_dir, "washer_log_*.csv")
+        log_files = glob.glob(search_pattern)
         if not log_files:
-            print("No washer_log CSV files found in the current directory.")
+            print(f"No washer_log CSV files found in {script_dir}.")
             print("Usage: python Visualise.py [path_to_csv1] [path_to_csv2] ...")
             sys.exit(1)
         target_files = sorted(log_files) # Sort to have consistent order
@@ -34,13 +36,26 @@ def main():
             print(f"Error reading {target_file}: {e}")
             continue
 
+        # Rename new Azure CSV columns to legacy names for compatibility
+        rename_map = {
+            'ts_ms': 'esp_ms',
+            'motion_score': 'motion',
+            'motion_avg': 'avg_motion_10s'
+        }
+        df = df.rename(columns=rename_map)
+
         # Ensure data types are correct
         for col in ['esp_ms', 'ax', 'ay', 'az', 'motion', 'avg_motion_10s']:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # Use esp_ms (converted to minutes relative to start) for the X-axis if available
-        if 'esp_ms' in df.columns and not df['esp_ms'].isna().all():
+        # Use received_at (converted to datetime) for the X-axis if available
+        if 'received_at' in df.columns and not df['received_at'].isna().all():
+            df['received_at'] = pd.to_datetime(df['received_at'])
+            x_col = df['received_at']
+            x_label = 'Time Received'
+        # Fallback to esp_ms (converted to minutes relative to start) if available
+        elif 'esp_ms' in df.columns and not df['esp_ms'].isna().all():
             x_col = (df['esp_ms'] - df['esp_ms'].iloc[0]) / 60000.0
             x_label = 'Time (minutes since start)'
         else:
@@ -49,15 +64,9 @@ def main():
 
         file_basename = os.path.basename(target_file)
         
-        # Set specific colors based on filenames
-        if file_basename == "washer_log_20260313_231123.csv":
-            base_color = "blue"  # Bright blue
-        elif file_basename == "washer_log_20260314_014951.csv":
-            base_color = "red"   # Bright red
-        else:
-            base_color = colors_motion[idx % len(colors_motion)]
-            
-        avg_color = "green"  # Average value always green
+        # Set distinct contrasting colors based on index rather than hardcoding names
+        base_color = colors_motion[idx % len(colors_motion)]
+        avg_color = colors_avg[idx % len(colors_avg)]
 
         # Plot Motion
         if 'motion' in df.columns:
