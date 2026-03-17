@@ -1,0 +1,194 @@
+
+
+Azure Functions Core Tools
+Core Tools Version:       4.8.0+ec58eb7110992ea02aa19e9c060e45ac8882cc02 (64-bit)
+Function Runtime Version: 4.1046.100.25610
+
+[2026-03-17T17:15:56.107Z] Worker process started and initialized.
+
+Functions:
+
+	dashboard: [GET] http://localhost:7071/api/dashboard
+
+	ingest: [POST] http://localhost:7071/api/ingest
+
+	samples: [GET] http://localhost:7071/api/samples
+
+For detailed output, run func with --verbose flag.
+[2026-03-17T17:16:01.463Z] Host lock lease acquired by instance ID '0000000000000000000000000D68AE40'.
+[2026-03-17T17:16:04.975Z] Executing 'Functions.samples' (Reason='This function was programmatically called via the host APIs.', Id=53b21790-6c58-4e64-9862-827cac288fad)
+[2026-03-17T17:16:05.024Z] WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+[2026-03-17T17:16:05.024Z] I0000 00:00:1773767765.023208 1369905 fork_posix.cc:75] Other threads are currently calling into gRPC, skipping fork() handlers
+[2026-03-17T17:16:05.093Z] Request URL: 'https://drawasherstorage.table.core.windows.net/Tables'
+[2026-03-17T17:16:05.093Z] Request method: 'POST'
+[2026-03-17T17:16:05.093Z] Request headers:
+[2026-03-17T17:16:05.093Z]     'Content-Type': 'application/json;odata=nometadata'
+[2026-03-17T17:16:05.093Z]     'Content-Length': '33'
+[2026-03-17T17:16:05.093Z]     'x-ms-version': 'REDACTED'
+[2026-03-17T17:16:05.093Z]     'DataServiceVersion': 'REDACTED'
+[2026-03-17T17:16:05.093Z]     'Accept': 'application/json;odata=minimalmetadata'
+[2026-03-17T17:16:05.093Z]     'x-ms-client-request-id': 'fb07087a-2224-11f1-8884-76921e3a02b3'
+[2026-03-17T17:16:05.093Z]     'x-ms-date': 'REDACTED'
+[2026-03-17T17:16:05.093Z]     'Date': 'Tue, 17 Mar 2026 17:16:05 GMT'
+[2026-03-17T17:16:05.093Z]     'User-Agent': 'azsdk-python-data-tables/12.7.0 Python/3.13.5 (macOS-26.2-arm64-arm-64bit-Mach-O)'
+[2026-03-17T17:16:05.093Z]     'Authorization': 'REDACTED'
+[2026-03-17T17:16:05.093Z] A body is sent with the request
+[2026-03-17T17:16:06.364Z] Response status: 201
+[2026-03-17T17:16:06.364Z] Response headers:
+[2026-03-17T17:16:06.364Z]     'Cache-Control': 'no-cache'
+[2026-03-17T17:16:06.364Z]     'Transfer-Encoding': 'chunked'
+[2026-03-17T17:16:06.364Z]     'Content-Type': 'application/json;odata=minimalmetadata;streaming=true;charset=utf-8'
+[2026-03-17T17:16:06.364Z]     'Location': 'REDACTED'
+[2026-03-17T17:16:06.364Z]     'Server': 'Windows-Azure-Table/1.0 Microsoft-HTTPAPI/2.0'
+[2026-03-17T17:16:06.364Z]     'x-ms-request-id': 'b3f12045-a002-005d-3631-b66769000000'
+[2026-03-17T17:16:06.364Z]     'x-ms-client-request-id': 'fb07087a-2224-11f1-8884-76921e3a02b3'
+[2026-03-17T17:16:06.364Z]     'x-ms-version': 'REDACTED'
+[2026-03-17T17:16:06.364Z]     'X-Content-Type-Options': 'REDACTED'
+[2026-03-17T17:16:06.364Z]     'Date': 'Tue, 17 Mar 2026 17:16:06 GMT'
+[2026-03-17T17:16:06.364Z] Request URL: 'https://drawasherstorage.table.core.windows.net/washersensordata()?$top=REDACTED'
+[2026-03-17T17:16:06.364Z] Request method: 'GET'
+[2026-03-17T17:16:06.364Z] Request headers:
+[2026-03-17T17:16:06.364Z]     'x-ms-version': 'REDACTED'
+[2026-03-17T17:16:06.364Z]     'DataServiceVersion': 'REDACTED'
+[2026-03-17T17:16:06.364Z]     'Accept': 'application/json;odata=minimalmetadata'
+[2026-03-17T17:16:06.364Z]     'x-ms-client-request-id': 'fbc92f18-2224-11f1-8884-76921e3a02b3'
+[2026-03-17T17:16:06.364Z]     'x-ms-date': 'REDACTED'
+[2026-03-17T17:16:06.364Z]     'Date': 'Tue, 17 Mar 2026 17:16:06 GMT'
+[2026-03-17T17:16:06.364Z]     'User-Agent': 'azsdk-python-data-tables/12.7.0 Python/3.13.5 (macOS-26.2-arm64-arm-64bit-Mach-O)'
+[2026-03-17T17:16:06.364Z]     'Authorization': 'REDACTED'
+[2026-03-17T17:16:06.364Z] No body was attached to the request
+[2026-03-17T17:16:06.380Z] Response status: 200
+[2026-03-17T17:16:06.381Z] Response headers:
+[2026-03-17T17:16:06.381Z]     'Cache-Control': 'no-cache'
+[2026-03-17T17:16:06.381Z]     'Transfer-Encoding': 'chunked'
+[2026-03-17T17:16:06.381Z]     'Content-Type': 'application/json;odata=minimalmetadata;streaming=true;charset=utf-8'
+[2026-03-17T17:16:06.381Z]     'Server': 'Windows-Azure-Table/1.0 Microsoft-HTTPAPI/2.0'
+[2026-03-17T17:16:06.381Z]     'x-ms-request-id': 'b3f1204d-a002-005d-3a31-b66769000000'
+[2026-03-17T17:16:06.381Z]     'x-ms-client-request-id': 'fbc92f18-2224-11f1-8884-76921e3a02b3'
+[2026-03-17T17:16:06.381Z]     'x-ms-version': 'REDACTED'
+[2026-03-17T17:16:06.381Z]     'X-Content-Type-Options': 'REDACTED'
+[2026-03-17T17:16:06.381Z]     'Date': 'Tue, 17 Mar 2026 17:16:06 GMT'
+[2026-03-17T17:16:06.398Z] Executed 'Functions.samples' (Succeeded, Id=53b21790-6c58-4e64-9862-827cac288fad, Duration=1433ms)
+[2026-03-17T17:16:13.212Z] Executing 'Functions.ingest' (Reason='This function was programmatically called via the host APIs.', Id=17938388-ce6b-4956-84e2-7d49282f82ed)
+[2026-03-17T17:16:13.217Z] Request URL: 'https://drawasherstorage.table.core.windows.net/Tables'
+[2026-03-17T17:16:13.217Z] Request method: 'POST'
+[2026-03-17T17:16:13.217Z] Request headers:
+[2026-03-17T17:16:13.217Z]     'Content-Type': 'application/json;odata=nometadata'
+[2026-03-17T17:16:13.217Z]     'Content-Length': '33'
+[2026-03-17T17:16:13.217Z]     'x-ms-version': 'REDACTED'
+[2026-03-17T17:16:13.217Z]     'DataServiceVersion': 'REDACTED'
+[2026-03-17T17:16:13.217Z]     'Accept': 'application/json;odata=minimalmetadata'
+[2026-03-17T17:16:13.217Z]     'x-ms-client-request-id': 'ffdedef4-2224-11f1-8884-76921e3a02b3'
+[2026-03-17T17:16:13.217Z]     'x-ms-date': 'REDACTED'
+[2026-03-17T17:16:13.217Z]     'Date': 'Tue, 17 Mar 2026 17:16:13 GMT'
+[2026-03-17T17:16:13.217Z]     'User-Agent': 'azsdk-python-data-tables/12.7.0 Python/3.13.5 (macOS-26.2-arm64-arm-64bit-Mach-O)'
+[2026-03-17T17:16:13.217Z]     'Authorization': 'REDACTED'
+[2026-03-17T17:16:13.217Z] A body is sent with the request
+[2026-03-17T17:16:13.364Z] Response status: 409
+[2026-03-17T17:16:13.364Z] Response headers:
+[2026-03-17T17:16:13.364Z]     'Cache-Control': 'no-cache'
+[2026-03-17T17:16:13.364Z]     'Transfer-Encoding': 'chunked'
+[2026-03-17T17:16:13.364Z]     'Content-Type': 'application/json;odata=minimalmetadata;streaming=true;charset=utf-8'
+[2026-03-17T17:16:13.364Z]     'Server': 'Windows-Azure-Table/1.0 Microsoft-HTTPAPI/2.0'
+[2026-03-17T17:16:13.364Z]     'x-ms-request-id': '88e97351-2002-0031-6931-b68cfe000000'
+[2026-03-17T17:16:13.364Z]     'x-ms-client-request-id': 'ffdedef4-2224-11f1-8884-76921e3a02b3'
+[2026-03-17T17:16:13.364Z]     'x-ms-version': 'REDACTED'
+[2026-03-17T17:16:13.364Z]     'X-Content-Type-Options': 'REDACTED'
+[2026-03-17T17:16:13.364Z]     'Date': 'Tue, 17 Mar 2026 17:16:12 GMT'
+[2026-03-17T17:16:13.364Z] Request URL: 'https://drawasherstorage.table.core.windows.net/washersensordata'
+[2026-03-17T17:16:13.364Z] Request method: 'POST'
+[2026-03-17T17:16:13.364Z] Request headers:
+[2026-03-17T17:16:13.364Z]     'Content-Type': 'application/json;odata=nometadata'
+[2026-03-17T17:16:13.364Z]     'Content-Length': '457'
+[2026-03-17T17:16:13.364Z]     'x-ms-version': 'REDACTED'
+[2026-03-17T17:16:13.364Z]     'DataServiceVersion': 'REDACTED'
+[2026-03-17T17:16:13.364Z]     'Accept': 'application/json;odata=minimalmetadata'
+[2026-03-17T17:16:13.364Z]     'x-ms-client-request-id': 'fff57326-2224-11f1-8884-76921e3a02b3'
+[2026-03-17T17:16:13.364Z]     'x-ms-date': 'REDACTED'
+[2026-03-17T17:16:13.364Z]     'Date': 'Tue, 17 Mar 2026 17:16:13 GMT'
+[2026-03-17T17:16:13.364Z]     'User-Agent': 'azsdk-python-data-tables/12.7.0 Python/3.13.5 (macOS-26.2-arm64-arm-64bit-Mach-O)'
+[2026-03-17T17:16:13.364Z]     'Authorization': 'REDACTED'
+[2026-03-17T17:16:13.364Z] A body is sent with the request
+[2026-03-17T17:16:13.378Z] Response status: 201
+[2026-03-17T17:16:13.378Z] Response headers:
+[2026-03-17T17:16:13.378Z]     'Cache-Control': 'no-cache'
+[2026-03-17T17:16:13.378Z]     'Transfer-Encoding': 'chunked'
+[2026-03-17T17:16:13.378Z]     'Content-Type': 'application/json;odata=minimalmetadata;streaming=true;charset=utf-8'
+[2026-03-17T17:16:13.378Z]     'ETag': 'W/"datetime'2026-03-17T17%3A16%3A13.3943216Z'"'
+[2026-03-17T17:16:13.378Z]     'Location': 'REDACTED'
+[2026-03-17T17:16:13.378Z]     'Server': 'Windows-Azure-Table/1.0 Microsoft-HTTPAPI/2.0'
+[2026-03-17T17:16:13.378Z]     'x-ms-request-id': '88e97354-2002-0031-6a31-b68cfe000000'
+[2026-03-17T17:16:13.378Z]     'x-ms-client-request-id': 'fff57326-2224-11f1-8884-76921e3a02b3'
+[2026-03-17T17:16:13.378Z]     'x-ms-version': 'REDACTED'
+[2026-03-17T17:16:13.378Z]     'X-Content-Type-Options': 'REDACTED'
+[2026-03-17T17:16:13.378Z]     'Date': 'Tue, 17 Mar 2026 17:16:12 GMT'
+[2026-03-17T17:16:13.378Z] Executed 'Functions.ingest' (Succeeded, Id=17938388-ce6b-4956-84e2-7d49282f82ed, Duration=173ms)
+[2026-03-17T17:16:18.098Z] Executing 'Functions.samples' (Reason='This function was programmatically called via the host APIs.', Id=e27f4019-a464-4402-a78c-03ae1004f07e)
+[2026-03-17T17:16:18.101Z] Request URL: 'https://drawasherstorage.table.core.windows.net/Tables'
+[2026-03-17T17:16:18.101Z] Request method: 'POST'
+[2026-03-17T17:16:18.101Z] Request headers:
+[2026-03-17T17:16:18.101Z]     'Content-Type': 'application/json;odata=nometadata'
+[2026-03-17T17:16:18.102Z]     'Content-Length': '33'
+[2026-03-17T17:16:18.102Z]     'x-ms-version': 'REDACTED'
+[2026-03-17T17:16:18.102Z]     'DataServiceVersion': 'REDACTED'
+[2026-03-17T17:16:18.102Z]     'Accept': 'application/json;odata=minimalmetadata'
+[2026-03-17T17:16:18.102Z]     'x-ms-client-request-id': '02c84f56-2225-11f1-8884-76921e3a02b3'
+[2026-03-17T17:16:18.102Z]     'x-ms-date': 'REDACTED'
+[2026-03-17T17:16:18.102Z]     'Date': 'Tue, 17 Mar 2026 17:16:18 GMT'
+[2026-03-17T17:16:18.102Z]     'User-Agent': 'azsdk-python-data-tables/12.7.0 Python/3.13.5 (macOS-26.2-arm64-arm-64bit-Mach-O)'
+[2026-03-17T17:16:18.102Z]     'Authorization': 'REDACTED'
+[2026-03-17T17:16:18.102Z] A body is sent with the request
+[2026-03-17T17:16:18.166Z] Response status: 409
+[2026-03-17T17:16:18.166Z] Response headers:
+[2026-03-17T17:16:18.166Z]     'Cache-Control': 'no-cache'
+[2026-03-17T17:16:18.166Z]     'Transfer-Encoding': 'chunked'
+[2026-03-17T17:16:18.166Z]     'Content-Type': 'application/json;odata=minimalmetadata;streaming=true;charset=utf-8'
+[2026-03-17T17:16:18.166Z]     'Server': 'Windows-Azure-Table/1.0 Microsoft-HTTPAPI/2.0'
+[2026-03-17T17:16:18.166Z]     'x-ms-request-id': '7347af72-f002-000d-5531-b6a539000000'
+[2026-03-17T17:16:18.166Z]     'x-ms-client-request-id': '02c84f56-2225-11f1-8884-76921e3a02b3'
+[2026-03-17T17:16:18.166Z]     'x-ms-version': 'REDACTED'
+[2026-03-17T17:16:18.166Z]     'X-Content-Type-Options': 'REDACTED'
+[2026-03-17T17:16:18.166Z]     'Date': 'Tue, 17 Mar 2026 17:16:17 GMT'
+[2026-03-17T17:16:18.166Z] Request URL: 'https://drawasherstorage.table.core.windows.net/washersensordata()?$top=REDACTED'
+[2026-03-17T17:16:18.166Z] Request method: 'GET'
+[2026-03-17T17:16:18.166Z] Request headers:
+[2026-03-17T17:16:18.166Z]     'x-ms-version': 'REDACTED'
+[2026-03-17T17:16:18.166Z]     'DataServiceVersion': 'REDACTED'
+[2026-03-17T17:16:18.166Z]     'Accept': 'application/json;odata=minimalmetadata'
+[2026-03-17T17:16:18.166Z]     'x-ms-client-request-id': '02d22814-2225-11f1-8884-76921e3a02b3'
+[2026-03-17T17:16:18.166Z]     'x-ms-date': 'REDACTED'
+[2026-03-17T17:16:18.166Z]     'Date': 'Tue, 17 Mar 2026 17:16:18 GMT'
+[2026-03-17T17:16:18.166Z]     'User-Agent': 'azsdk-python-data-tables/12.7.0 Python/3.13.5 (macOS-26.2-arm64-arm-64bit-Mach-O)'
+[2026-03-17T17:16:18.166Z]     'Authorization': 'REDACTED'
+[2026-03-17T17:16:18.166Z] No body was attached to the request
+[2026-03-17T17:16:18.181Z] Response status: 200
+[2026-03-17T17:16:18.181Z] Response headers:
+[2026-03-17T17:16:18.181Z]     'Cache-Control': 'no-cache'
+[2026-03-17T17:16:18.181Z]     'Transfer-Encoding': 'chunked'
+[2026-03-17T17:16:18.181Z]     'Content-Type': 'application/json;odata=minimalmetadata;streaming=true;charset=utf-8'
+[2026-03-17T17:16:18.181Z]     'Server': 'Windows-Azure-Table/1.0 Microsoft-HTTPAPI/2.0'
+[2026-03-17T17:16:18.181Z]     'x-ms-request-id': '7347af75-f002-000d-5631-b6a539000000'
+[2026-03-17T17:16:18.181Z]     'x-ms-client-request-id': '02d22814-2225-11f1-8884-76921e3a02b3'
+[2026-03-17T17:16:18.181Z]     'x-ms-version': 'REDACTED'
+[2026-03-17T17:16:18.181Z]     'X-Content-Type-Options': 'REDACTED'
+[2026-03-17T17:16:18.181Z]     'Date': 'Tue, 17 Mar 2026 17:16:17 GMT'
+[2026-03-17T17:16:18.182Z] Executed 'Functions.samples' (Succeeded, Id=e27f4019-a464-4402-a78c-03ae1004f07e, Duration=83ms)
+[2026-03-17T17:16:39.321Z] Worker process started and initialized.
+[2026-03-17T17:16:44.381Z] Host lock lease acquired by instance ID '0000000000000000000000000D68AE40'.
+[2026-03-17T17:16:57.308Z] Worker process started and initialized.
+[2026-03-17T17:17:02.370Z] Host lock lease acquired by instance ID '0000000000000000000000000D68AE40'.
+[2026-03-17T17:21:32.201Z] Worker process started and initialized.
+[2026-03-17T17:21:37.343Z] Host lock lease acquired by instance ID '0000000000000000000000000D68AE40'.
+[2026-03-17T17:27:56.976Z] Worker process started and initialized.
+[2026-03-17T17:28:02.040Z] Host lock lease acquired by instance ID '0000000000000000000000000D68AE40'.
+[2026-03-17T17:31:20.847Z] Worker process started and initialized.
+[2026-03-17T17:31:25.904Z] Host lock lease acquired by instance ID '0000000000000000000000000D68AE40'.
+[2026-03-17T17:31:33.717Z] Worker process started and initialized.
+[2026-03-17T17:31:38.773Z] Host lock lease acquired by instance ID '0000000000000000000000000D68AE40'.
+[2026-03-17T17:32:03.025Z] Worker process started and initialized.
+[2026-03-17T17:32:08.099Z] Host lock lease acquired by instance ID '0000000000000000000000000D68AE40'.
+[2026-03-17T17:32:14.091Z] Worker process started and initialized.
+[2026-03-17T17:32:19.152Z] Host lock lease acquired by instance ID '0000000000000000000000000D68AE40'.
+[2026-03-17T17:39:46.475Z] Worker process started and initialized.
+[2026-03-17T17:39:49.961Z] Worker process started and initialized.
+[2026-03-17T17:39:55.050Z] Host lock lease acquired by instance ID '0000000000000000000000000D68AE40'.

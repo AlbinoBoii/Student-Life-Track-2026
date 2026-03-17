@@ -158,12 +158,13 @@ def samples(req: func.HttpRequest) -> func.HttpResponse:
 
     table = _get_table_client()
 
-    query_kwargs = {"results_per_page": limit}
     if odata_filter:
-        query_kwargs["query_filter"] = odata_filter
+        entity_iter = table.query_entities(odata_filter, results_per_page=limit)
+    else:
+        entity_iter = table.list_entities(results_per_page=limit)
 
     rows = []
-    for entity in table.list_entities(**query_kwargs):
+    for entity in entity_iter:
         rows.append({
             "device_id": entity.get("PartitionKey", ""),
             "boot_id": entity.get("boot_id", ""),
@@ -341,8 +342,28 @@ async function loadData() {
   try {
     const q = buildQuery();
     q.set('format','json');
-    const res = await fetch(BASE+'/api/samples?'+q);
-    const data = await res.json();
+    const url = BASE + '/api/samples?' + q;
+    const res = await fetch(url);
+    
+    // Check if not OK before trying to parse JSON
+    if (!res.ok) {
+       const text = await res.text();
+       throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+
+    const text = await res.text();
+    if (!text || text.trim() === "") {
+        throw new Error("API returned an empty response body.");
+    }
+    
+    let data;
+    try {
+        data = JSON.parse(text);
+    } catch (err) {
+        console.error("Raw response:", text);
+        throw new Error("Failed to parse JSON. Open browser console to see raw response.");
+    }
+
     const rows = data.samples || [];
 
     st.textContent = rows.length + ' samples loaded @ ' + new Date().toLocaleTimeString();

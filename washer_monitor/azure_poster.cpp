@@ -12,6 +12,8 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <sys/time.h>
+#include <time.h>
 
 #include "config.h"
 #include "secrets.h"
@@ -25,7 +27,7 @@ static unsigned long seqCounter = 0;
 
 // Simple ring-buffer for raw samples (fixed max size).
 struct AzureSample {
-  unsigned long ts_ms;
+  uint64_t ts_ms;
   int16_t ax, ay, az;
   float   motion;
   const char* state;
@@ -64,7 +66,17 @@ void bufferSampleForAzure() {
 
   SensorSample s = getLatestSample();
 
-  sampleBuf[bufCount].ts_ms  = s.esp_ms;
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  
+  if (tv.tv_sec > 1000000000ULL) {
+    // NTP has synced (Unix epoch is well past 1 billion)
+    sampleBuf[bufCount].ts_ms = (uint64_t)tv.tv_sec * 1000ULL + (uint64_t)(tv.tv_usec / 1000);
+  } else {
+    // NTP not synced yet, fall back to hardware millis
+    sampleBuf[bufCount].ts_ms = s.esp_ms;
+  }
+
   sampleBuf[bufCount].ax     = s.ax;
   sampleBuf[bufCount].ay     = s.ay;
   sampleBuf[bufCount].az     = s.az;
@@ -108,7 +120,9 @@ void flushAzureBatch() {
   for (int i = 0; i < bufCount; i++) {
     if (i > 0) json += ",";
     json += "{\"ts_ms\":";
-    json += String(sampleBuf[i].ts_ms);
+    char tsStr[32];
+    sprintf(tsStr, "%llu", (unsigned long long)sampleBuf[i].ts_ms);
+    json += tsStr;
     json += ",\"ax\":";
     json += String(sampleBuf[i].ax);
     json += ",\"ay\":";

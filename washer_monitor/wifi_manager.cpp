@@ -1,6 +1,7 @@
 #include "wifi_manager.h"
 
 #include <WiFi.h>
+#include <time.h>
 #include "config.h"
 #include "secrets.h"
 
@@ -31,6 +32,11 @@ bool connectWiFi(unsigned long timeoutMs) {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("[WiFi] Connected. IP: ");
     Serial.println(WiFi.localIP());
+    
+    // Sync time via NTP
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    Serial.println("[WiFi] NTP time sync started.");
+    
     return true;
   } else {
     Serial.print("[WiFi] Failed. Status: ");
