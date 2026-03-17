@@ -226,51 +226,68 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   :root{--bg:#0f172a;--surface:#1e293b;--border:#334155;--accent:#38bdf8;--accent2:#818cf8;--text:#e2e8f0;--muted:#94a3b8;--green:#22c55e;--red:#ef4444;}
   *{margin:0;padding:0;box-sizing:border-box;}
   body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
-  .navbar{background:var(--surface);border-bottom:1px solid var(--border);padding:1rem 2rem;display:flex;align-items:center;gap:1rem;}
+  .navbar{background:var(--surface);border-bottom:1px solid var(--border);padding:1rem 2rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;}
   .navbar h1{font-size:1.25rem;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
-  .navbar .pill{font-size:.75rem;padding:.25rem .75rem;border-radius:9999px;background:var(--green);color:#000;font-weight:600;}
-  .controls{display:flex;flex-wrap:wrap;gap:.75rem;padding:1.25rem 2rem;align-items:end;}
+  .navbar .pill{font-size:.70rem;padding:.2rem .6rem;border-radius:9999px;background:var(--border);color:var(--muted);font-weight:600;text-transform:uppercase;}
+  .navbar .pill.live{background:rgba(34,197,94,0.2);color:var(--green);border:1px solid var(--green);}
+  
+  .tabs{display:flex;gap:1rem;padding:1rem 2rem 0;border-bottom:1px solid var(--border);background:var(--bg);}
+  .tab-btn{background:none;border:none;color:var(--muted);padding:.75rem 1rem;cursor:pointer;font-weight:600;font-size:.9rem;border-bottom:2px solid transparent;transition:all .2s;}
+  .tab-btn.active{color:var(--accent);border-bottom-color:var(--accent);}
+  .tab-btn:hover:not(.active){color:var(--text);}
+
+  .controls{display:flex;flex-wrap:wrap;gap:.75rem;padding:1.25rem 2rem;align-items:end;background:var(--surface);margin:1px 0;}
   .field{display:flex;flex-direction:column;gap:.25rem;}
   .field label{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);}
-  .field input,.field select{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:.45rem .7rem;border-radius:.375rem;font-size:.85rem;}
+  .field input,.field select{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:.45rem .7rem;border-radius:.375rem;font-size:.85rem;}
   .btn{padding:.5rem 1.25rem;border:none;border-radius:.375rem;font-weight:600;cursor:pointer;font-size:.85rem;transition:all .15s;}
   .btn-primary{background:var(--accent);color:#000;}.btn-primary:hover{opacity:.85;}
   .btn-secondary{background:var(--surface);color:var(--text);border:1px solid var(--border);}.btn-secondary:hover{border-color:var(--accent);}
-  .grid{display:grid;grid-template-columns:1fr;gap:1.25rem;padding:0 2rem 2rem;}
+  
+  .grid{display:grid;grid-template-columns:1fr;gap:1.25rem;padding:2rem;}
   @media(min-width:900px){.grid{grid-template-columns:1fr 1fr;}}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:.75rem;padding:1.25rem;position:relative;overflow:hidden;}
   .card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--accent2));}
   .card h2{font-size:.9rem;color:var(--muted);margin-bottom:.75rem;}
-  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1rem;padding:0 2rem 1.25rem;}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1rem;padding:1rem 2rem;}
   .stat{background:var(--surface);border:1px solid var(--border);border-radius:.5rem;padding:1rem;text-align:center;}
   .stat .val{font-size:1.5rem;font-weight:700;color:var(--accent);}
   .stat .lbl{font-size:.7rem;color:var(--muted);margin-top:.25rem;text-transform:uppercase;letter-spacing:.05em;}
-  .spinner{display:none;width:1.5rem;height:1.5rem;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;}
+  .spinner{display:none;width:1.2rem;height:1.2rem;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg)}}
-  #status{font-size:.8rem;color:var(--muted);padding:0 2rem;}
+  #status{font-size:.75rem;color:var(--muted);padding:0 2rem;margin-top:-.5rem;}
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
 
 <nav class="navbar">
   <h1>⚙ Dra-Washer Monitor</h1>
-  <span class="pill" id="livePill">DASHBOARD</span>
+  <div style="display:flex;align-items:center;gap:0.5rem;">
+    <div class="spinner" id="spinner"></div>
+    <span class="pill" id="modePill">Historical</span>
+  </div>
 </nav>
+
+<div class="tabs">
+  <button class="tab-btn active" id="tabHist" onclick="switchTab('hist')">Historical Data</button>
+  <button class="tab-btn" id="tabLive" onclick="switchTab('live')">Live</button>
+</div>
 
 <div class="controls">
   <div class="field">
     <label>Device ID</label>
     <input id="deviceId" value="ESP32 Washer Monitor" placeholder="device id">
   </div>
-  <div class="field">
+  <div class="field" id="fieldSince">
     <label>Since</label>
     <input id="since" type="datetime-local">
   </div>
-  <div class="field">
+  <div class="field" id="fieldUntil">
     <label>Until</label>
     <input id="until" type="datetime-local">
   </div>
-  <div class="field">
+  <div class="field" id="fieldState">
     <label>State</label>
     <select id="stateFilter"><option value="">All</option><option>IDLE</option><option>RUNNING</option></select>
   </div>
@@ -278,13 +295,21 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <label>Limit</label>
     <input id="limit" type="number" value="1000" min="1" max="10000">
   </div>
+  <div class="field hidden" id="fieldRefresh">
+    <label>Refresh Every</label>
+    <select id="refreshRate" onchange="resetRefreshTimer()">
+      <option value="5000">5 Seconds</option>
+      <option value="10000" selected>10 Seconds</option>
+      <option value="30000">30 Seconds</option>
+      <option value="60000">1 Minute</option>
+    </select>
+  </div>
   <div class="field" style="flex-direction:row; align-items:center; gap:0.5rem; justify-content:center; padding-bottom:0.4rem;">
     <input type="checkbox" id="showStateBg" checked onchange="loadData()">
-    <label style="margin:0; text-transform:none; font-size:0.85rem; cursor:pointer;" for="showStateBg">Show State Background</label>
+    <label style="margin:0; text-transform:none; font-size:0.85rem; cursor:pointer;" for="showStateBg">Backgrounds</label>
   </div>
-  <button class="btn btn-primary" onclick="loadData()">Load Data</button>
-  <button class="btn btn-secondary" onclick="downloadCSV()">⬇ Download CSV</button>
-  <div class="spinner" id="spinner"></div>
+  <button class="btn btn-primary" id="btnLoad" onclick="loadData()">Load Data</button>
+  <button class="btn btn-secondary" id="btnDownload" onclick="downloadCSV()">⬇ CSV</button>
 </div>
 
 <p id="status"></p>
@@ -304,6 +329,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <script>
 const BASE = window.location.origin;
 let motionChart, accelChart;
+let currentTab = 'hist';
+let refreshInterval = null;
 
 function initCharts() {
   const shared = {responsive:true,animation:{duration:300},scales:{
@@ -330,36 +357,35 @@ function initCharts() {
         const yAxis = chart.scales.y;
         const stateArray = chart.data.customStateArray;
         if (!stateArray) return;
-        ctx.save();
-        let startIdx = 0;
-        let currentState = stateArray[0];
         
         const meta = chart.getDatasetMeta(0);
-        if (!meta.data || meta.data.length === 0) {
-            ctx.restore();
-            return;
-        }
+        if (!meta.data || meta.data.length === 0) return;
+
+        ctx.save();
+        let startIdx = 0;
+        let currentState = (stateArray[0] || "").toUpperCase().trim();
 
         for (let i = 1; i <= stateArray.length; i++) {
-          if (i === stateArray.length || stateArray[i] !== currentState) {
-            
+          const nextState = i < stateArray.length ? (stateArray[i] || "").toUpperCase().trim() : "END";
+          
+          if (i === stateArray.length || nextState !== currentState) {
             let leftX = startIdx === 0 ? xAxis.left : meta.data[startIdx].x;
-            let rightX = i === stateArray.length ? xAxis.right : meta.data[i].x;
+            let rightX = i === stateArray.length ? xAxis.right : (meta.data[i] ? meta.data[i].x : xAxis.right);
 
             if (currentState === 'RUNNING') {
-              ctx.fillStyle = 'rgba(239, 68, 68, 0.15)'; 
+              ctx.fillStyle = 'rgba(239, 68, 68, 0.3)'; 
             } else if (currentState === 'IDLE') {
-              ctx.fillStyle = 'rgba(34, 197, 94, 0.15)'; 
+              ctx.fillStyle = 'rgba(34, 197, 94, 0.3)'; 
             } else {
               ctx.fillStyle = 'transparent';
             }
             
-            ctx.fillRect(leftX, yAxis.top, rightX - leftX, yAxis.bottom - yAxis.top);
+            if (ctx.fillStyle !== 'transparent') {
+                ctx.fillRect(leftX, yAxis.top, rightX - leftX, yAxis.bottom - yAxis.top);
+            }
 
             startIdx = i;
-            if (i < stateArray.length) {
-              currentState = stateArray[i];
-            }
+            currentState = nextState;
           }
         }
         ctx.restore();
@@ -378,14 +404,58 @@ function initCharts() {
   });
 }
 
+function switchTab(tab) {
+  currentTab = tab;
+  const isLive = (tab === 'live');
+  
+  document.getElementById('tabHist').classList.toggle('active', !isLive);
+  document.getElementById('tabLive').classList.toggle('active', isLive);
+  
+  document.getElementById('fieldSince').classList.toggle('hidden', isLive);
+  document.getElementById('fieldUntil').classList.toggle('hidden', isLive);
+  document.getElementById('fieldState').classList.toggle('hidden', isLive);
+  document.getElementById('btnDownload').classList.toggle('hidden', isLive);
+  document.getElementById('fieldRefresh').classList.toggle('hidden', !isLive);
+  
+  const modePill = document.getElementById('modePill');
+  modePill.textContent = isLive ? 'LIVE' : 'Historical';
+  modePill.classList.toggle('live', isLive);
+
+  if (isLive) {
+    loadData();
+    resetRefreshTimer();
+  } else {
+    if (refreshInterval) {
+      clearInterval(refreshInterval);
+      refreshInterval = null;
+    }
+    loadData();
+  }
+}
+
+function resetRefreshTimer() {
+  if (refreshInterval) clearInterval(refreshInterval);
+  if (currentTab === 'live') {
+    const rate = parseInt(document.getElementById('refreshRate').value);
+    refreshInterval = setInterval(loadData, rate);
+  }
+}
+
 function buildQuery() {
   const p = new URLSearchParams();
   const d = document.getElementById('deviceId').value;
   if(d) p.set('device_id', d);
-  const s = document.getElementById('since').value;
-  if(s) p.set('since', new Date(s).toISOString());
-  const u = document.getElementById('until').value;
-  if(u) p.set('until', new Date(u).toISOString());
+  
+  if (currentTab === 'live') {
+    const oneHrAgo = new Date(Date.now() - 3600 * 1000);
+    p.set('since', oneHrAgo.toISOString());
+  } else {
+    const s = document.getElementById('since').value;
+    if(s) p.set('since', new Date(s).toISOString());
+    const u = document.getElementById('until').value;
+    if(u) p.set('until', new Date(u).toISOString());
+  }
+
   const st = document.getElementById('stateFilter').value;
   if(st) p.set('state', st);
   p.set('limit', document.getElementById('limit').value || '1000');
@@ -396,7 +466,7 @@ async function loadData() {
   const sp = document.getElementById('spinner');
   const st = document.getElementById('status');
   sp.style.display = 'inline-block';
-  st.textContent = 'Loading…';
+  st.textContent = currentTab === 'live' ? 'Refreshing live data...' : 'Loading...';
 
   try {
     const q = buildQuery();
@@ -404,29 +474,20 @@ async function loadData() {
     const url = BASE + '/api/samples?' + q;
     const res = await fetch(url);
     
-    // Check if not OK before trying to parse JSON
     if (!res.ok) {
        const text = await res.text();
        throw new Error(`HTTP ${res.status}: ${text}`);
     }
 
-    const text = await res.text();
-    if (!text || text.trim() === "") {
-        throw new Error("API returned an empty response body.");
-    }
-    
-    let data;
-    try {
-        data = JSON.parse(text);
-    } catch (err) {
-        console.error("Raw response:", text);
-        throw new Error("Failed to parse JSON. Open browser console to see raw response.");
-    }
-
+    const data = await res.json();
     const rows = data.samples || [];
     rows.reverse();
 
     st.textContent = rows.length + ' samples loaded @ ' + new Date().toLocaleTimeString();
+    if (currentTab === 'live') {
+      const rate = document.getElementById('refreshRate').value / 1000;
+      st.textContent += ' (Next refresh in ' + rate + 's)';
+    }
 
     // stats
     document.getElementById('statTotal').textContent = rows.length;
@@ -440,18 +501,18 @@ async function loadData() {
     }
 
     // charts
-    const labels = rows.map(r=> new Date(r.ts_ms).toLocaleTimeString());
+    const labels = rows.map(r=> new Date(r.ts_ms).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}));
     motionChart.data.labels = labels;
-    motionChart.data.customStateArray = rows.map(r=>r.state); // Custom array for plugin
+    motionChart.data.customStateArray = rows.map(r=>r.state);
     motionChart.data.datasets[0].data = rows.map(r=>r.motion_score);
     motionChart.data.datasets[1].data = rows.map(r=>r.motion_avg || null);
-    motionChart.update();
+    motionChart.update('none'); // Update without animation for smoothness
 
     accelChart.data.labels = labels;
     accelChart.data.datasets[0].data = rows.map(r=>r.ax);
     accelChart.data.datasets[1].data = rows.map(r=>r.ay);
     accelChart.data.datasets[2].data = rows.map(r=>r.az);
-    accelChart.update();
+    accelChart.update('none');
   } catch(e) {
     st.textContent = 'Error: '+e.message;
   } finally {
@@ -466,6 +527,7 @@ function downloadCSV() {
 }
 
 initCharts();
+loadData(); // Initial load
 </script>
 </body>
 </html>"""
