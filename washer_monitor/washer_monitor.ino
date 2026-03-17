@@ -6,6 +6,7 @@
 #include "mpu_sensor.h"
 #include "washer_logic.h"
 #include "serial_logger.h"
+#include "azure_poster.h"
 
 static unsigned long lastSampleMs = 0;
 static unsigned long lastStatusMs = 0;
@@ -39,6 +40,7 @@ void setup() {
   setupMPU();
   initWasherLogic();
   serialLoggerBegin();
+  initAzurePoster();
 
   connectWiFi(30000);
   queueTelegram(String(DEVICE_NAME) + ": boot complete.");
@@ -54,7 +56,10 @@ void loop() {
     lastSampleMs = now;
     sampleMotion();
     serialLoggerLogSample();
+    bufferSampleForAzure();
   }
+
+  flushAzureBatch();
 
   if (now - lastStatusMs >= STATUS_PRINT_MS) {
     lastStatusMs = now;

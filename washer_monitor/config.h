@@ -35,3 +35,10 @@ constexpr unsigned long STATUS_PRINT_MS    = 1000UL;
 // =========================
 constexpr bool SERIAL_LOG_ENABLED         = true;
 constexpr unsigned long SERIAL_LOG_MS     = 100;   // log every 100 ms
+
+// =========================
+// AZURE (optional data sink)
+// =========================
+constexpr bool   AZURE_ENABLED         = true;  // azure kill switch
+constexpr int    AZURE_BATCH_SIZE      = 30;     // samples per POST batch
+constexpr unsigned long AZURE_FLUSH_MS = 5000UL; // max time between POSTs
