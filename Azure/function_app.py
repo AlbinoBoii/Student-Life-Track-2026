@@ -95,7 +95,8 @@ def ingest(req: func.HttpRequest) -> func.HttpResponse:
             "az": s.get("az", 0),
             "motion_score": float(s.get("motion_score", 0)),
             "motion_avg": float(s.get("motion_avg", 0)),
-            "state": s.get("state", ""),
+            "overall_state": s.get("overall_state", s.get("state", "")),
+            "sub_state": s.get("sub_state", ""),
             "wifi_rssi_dbm": s.get("wifi_rssi_dbm"),
             "received_at": now_iso,
         }
@@ -149,7 +150,7 @@ def samples(req: func.HttpRequest) -> func.HttpResponse:
     if device_id:
         filters.append(f"PartitionKey eq '{device_id}'")
     if state_filter:
-        filters.append(f"state eq '{state_filter}'")
+        filters.append(f"overall_state eq '{state_filter}'")
     if since:
         filters.append(f"received_at ge '{since}'")
     if until:
@@ -181,7 +182,8 @@ def samples(req: func.HttpRequest) -> func.HttpResponse:
             "az": entity.get("az", 0),
             "motion_score": entity.get("motion_score", 0),
             "motion_avg": entity.get("motion_avg", 0),
-            "state": entity.get("state", ""),
+            "overall_state": entity.get("overall_state", entity.get("state", "")),
+            "sub_state": entity.get("sub_state", ""),
             "wifi_rssi_dbm": entity.get("wifi_rssi_dbm"),
             "received_at": entity.get("received_at", ""),
         })
@@ -207,6 +209,65 @@ def samples(req: func.HttpRequest) -> func.HttpResponse:
     # --- JSON ---
     return func.HttpResponse(
         json.dumps({"count": len(rows), "samples": rows}),
+        mimetype="application/json",
+    )
+
+
+# ---------------------------------------------------------------------------
+# PATCH /api/label
+# ---------------------------------------------------------------------------
+
+from azure.data.tables import UpdateMode
+
+@app.route(route="label", methods=["PATCH"])
+def label(req: func.HttpRequest) -> func.HttpResponse:
+    """Bulk-update sub_state on existing rows."""
+    try:
+        body = req.get_json()
+    except ValueError:
+        return func.HttpResponse(
+            json.dumps({"ok": False, "error": "invalid JSON"}),
+            status_code=400,
+            mimetype="application/json",
+        )
+
+    device_id = body.get("device_id", "")
+    row_keys = body.get("row_keys", [])
+    sub_state = body.get("sub_state", "")
+
+    valid_sub_states = {"", "IDLE", "WASH", "SPINDRY"}
+    if sub_state not in valid_sub_states:
+        return func.HttpResponse(
+            json.dumps({"ok": False, "error": f"Invalid sub_state. Must be one of {valid_sub_states}"}),
+            status_code=400,
+            mimetype="application/json",
+        )
+
+    if not device_id or not row_keys:
+        return func.HttpResponse(
+            json.dumps({"ok": False, "error": "device_id and row_keys are required"}),
+            status_code=400,
+            mimetype="application/json",
+        )
+
+    table = _get_table_client()
+    updated = 0
+    errors = 0
+
+    import logging
+    for rk in row_keys:
+        try:
+            table.update_entity(
+                {"PartitionKey": device_id, "RowKey": rk, "sub_state": sub_state},
+                mode=UpdateMode.MERGE
+            )
+            updated += 1
+        except Exception as e:
+            logging.error(f"Error updating entity {rk}: {e}")
+            errors += 1
+
+    return func.HttpResponse(
+        json.dumps({"ok": True, "updated": updated, "errors": errors}),
         mimetype="application/json",
     )
 
@@ -272,6 +333,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <div class="tabs">
   <button class="tab-btn active" id="tabHist" onclick="switchTab('hist')">Historical Data</button>
   <button class="tab-btn" id="tabLive" onclick="switchTab('live')">Live</button>
+  <button class="tab-btn" id="tabMl" onclick="switchTab('ml')">ML Training</button>
 </div>
 
 <div class="controls">
@@ -312,6 +374,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <button class="btn btn-secondary" id="btnDownload" onclick="downloadCSV()">⬇ CSV</button>
 </div>
 
+
+<div class="controls hidden" id="mlControls">
+  <div class="field" style="flex-direction:row; align-items:center;">
+    <label style="margin-right:1rem;">Label Selection:</label>
+    <input type="radio" name="subState" id="ssIdle" value="IDLE" checked><label for="ssIdle" style="margin-right:1rem; cursor:pointer;">IDLE</label>
+    <input type="radio" name="subState" id="ssWash" value="WASH"><label for="ssWash" style="margin-right:1rem; cursor:pointer;">WASH</label>
+    <input type="radio" name="subState" id="ssSpin" value="SPINDRY"><label for="ssSpin" style="cursor:pointer;">SPINDRY</label>
+  </div>
+  <button class="btn btn-primary" onclick="applyLabel()">Apply Label</button>
+  <button class="btn btn-secondary" onclick="clearSelection()">Clear Selection</button>
+  <button class="btn btn-secondary" onclick="downloadLabelledCSV()">⬇ Labelled CSV</button>
+</div>
+
 <p id="status"></p>
 
 <div class="stats">
@@ -319,6 +394,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <div class="stat"><div class="val" id="statMotionAvg">—</div><div class="lbl">Avg Motion</div></div>
   <div class="stat"><div class="val" id="statMotionMax">—</div><div class="lbl">Max Motion</div></div>
   <div class="stat"><div class="val" id="statRunning">—</div><div class="lbl">Running %</div></div>
+  <div class="stat"><div class="val" id="statUnlabelled">—</div><div class="lbl">Unlabelled</div></div>
 </div>
 
 <div class="grid">
@@ -346,49 +422,72 @@ function initCharts() {
     ]},
     options:{...shared},
     plugins: [{
+      
       id: 'customStateBg',
       beforeDraw: (chart) => {
-        const showBg = document.getElementById('showStateBg') && document.getElementById('showStateBg').checked;
-        if (!showBg) return;
-        if (!chart.data.labels || chart.data.labels.length === 0) return;
-        
         const ctx = chart.canvas.getContext('2d');
         const xAxis = chart.scales.x;
         const yAxis = chart.scales.y;
-        const stateArray = chart.data.customStateArray;
-        if (!stateArray) return;
-        
         const meta = chart.getDatasetMeta(0);
-        if (!meta.data || meta.data.length === 0) return;
+        if (!meta.data || meta.data.length === 0 || !window.loadedRows || window.loadedRows.length === 0) return;
+        
+        // Draw overall_state bg
+        const showBg = document.getElementById('showStateBg') && document.getElementById('showStateBg').checked;
+        if (showBg) {
+            ctx.save();
+            let startIdx = 0;
+            let currentState = (window.loadedRows[0].overall_state || window.loadedRows[0].state || "").toUpperCase().trim();
 
+            for (let i = 1; i <= window.loadedRows.length; i++) {
+              const nextState = i < window.loadedRows.length ? (window.loadedRows[i].overall_state || window.loadedRows[i].state || "").toUpperCase().trim() : "END";
+              
+              if (i === window.loadedRows.length || nextState !== currentState) {
+                let leftX = startIdx === 0 ? xAxis.left : meta.data[startIdx].x;
+                let rightX = i === window.loadedRows.length ? xAxis.right : (meta.data[i] ? meta.data[i].x : xAxis.right);
+
+                if (currentState === 'RUNNING') ctx.fillStyle = 'rgba(239, 68, 68, 0.2)'; 
+                else if (currentState === 'IDLE') ctx.fillStyle = 'rgba(34, 197, 94, 0.2)'; 
+                else ctx.fillStyle = 'transparent';
+                
+                if (ctx.fillStyle !== 'transparent') ctx.fillRect(leftX, yAxis.top, rightX - leftX, yAxis.bottom - yAxis.top);
+                startIdx = i; currentState = nextState;
+              }
+            }
+            ctx.restore();
+        }
+        
+        // Draw sub_state overlays
         ctx.save();
-        let startIdx = 0;
-        let currentState = (stateArray[0] || "").toUpperCase().trim();
-
-        for (let i = 1; i <= stateArray.length; i++) {
-          const nextState = i < stateArray.length ? (stateArray[i] || "").toUpperCase().trim() : "END";
-          
-          if (i === stateArray.length || nextState !== currentState) {
-            let leftX = startIdx === 0 ? xAxis.left : meta.data[startIdx].x;
-            let rightX = i === stateArray.length ? xAxis.right : (meta.data[i] ? meta.data[i].x : xAxis.right);
-
-            if (currentState === 'RUNNING') {
-              ctx.fillStyle = 'rgba(239, 68, 68, 0.3)'; 
-            } else if (currentState === 'IDLE') {
-              ctx.fillStyle = 'rgba(34, 197, 94, 0.3)'; 
-            } else {
-              ctx.fillStyle = 'transparent';
+        let subStartIdx = 0;
+        let currentSubState = (window.loadedRows[0].sub_state || "").toUpperCase().trim();
+        for (let i = 1; i <= window.loadedRows.length; i++) {
+            const nextSub = i < window.loadedRows.length ? (window.loadedRows[i].sub_state || "").toUpperCase().trim() : "END";
+            if (i === window.loadedRows.length || nextSub !== currentSubState) {
+                if (currentSubState === 'WASH' || currentSubState === 'SPINDRY') {
+                    let leftX = subStartIdx === 0 ? xAxis.left : meta.data[subStartIdx].x;
+                    let rightX = i === window.loadedRows.length ? xAxis.right : (meta.data[i] ? meta.data[i].x : xAxis.right);
+                    ctx.fillStyle = currentSubState === 'WASH' ? 'rgba(56, 189, 248, 0.4)' : 'rgba(245, 158, 11, 0.4)';
+                    ctx.fillRect(leftX, yAxis.bottom - 20, rightX - leftX, 20);
+                }
+                subStartIdx = i; currentSubState = nextSub;
             }
-            
-            if (ctx.fillStyle !== 'transparent') {
-                ctx.fillRect(leftX, yAxis.top, rightX - leftX, yAxis.bottom - yAxis.top);
-            }
-
-            startIdx = i;
-            currentState = nextState;
-          }
         }
         ctx.restore();
+
+        // Draw selection overlay
+        if (currentTab === 'ml' && selectionStartIdx !== null && selectionEndIdx !== null) {
+           const sIdx = Math.min(selectionStartIdx, selectionEndIdx);
+           const eIdx = Math.max(selectionStartIdx, selectionEndIdx);
+           const leftX = meta.data[sIdx].x;
+           const rightX = meta.data[eIdx].x;
+           ctx.save();
+           ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+           ctx.fillRect(leftX, yAxis.top, rightX - leftX, yAxis.bottom - yAxis.top);
+           ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+           ctx.lineWidth = 2;
+           ctx.strokeRect(leftX, yAxis.top, rightX - leftX, yAxis.bottom - yAxis.top);
+           ctx.restore();
+        }
       }
     }]
   });
@@ -404,21 +503,32 @@ function initCharts() {
   });
 }
 
+
 function switchTab(tab) {
   currentTab = tab;
   const isLive = (tab === 'live');
+  const isMl = (tab === 'ml');
   
-  document.getElementById('tabHist').classList.toggle('active', !isLive);
+  document.getElementById('tabHist').classList.toggle('active', tab === 'hist');
   document.getElementById('tabLive').classList.toggle('active', isLive);
+  document.getElementById('tabMl').classList.toggle('active', isMl);
   
   document.getElementById('fieldSince').classList.toggle('hidden', isLive);
   document.getElementById('fieldUntil').classList.toggle('hidden', isLive);
   document.getElementById('fieldState').classList.toggle('hidden', isLive);
-  document.getElementById('btnDownload').classList.toggle('hidden', isLive);
+  
+  const dlBtn = document.getElementById('btnDownload');
+  if(dlBtn) dlBtn.classList.toggle('hidden', isLive || isMl);
+  
   document.getElementById('fieldRefresh').classList.toggle('hidden', !isLive);
   
+  const mlCtrl = document.getElementById('mlControls');
+  if(mlCtrl) mlCtrl.classList.toggle('hidden', !isMl);
+  
+  document.getElementById('btnLoad').classList.toggle('hidden', isMl);
+  
   const modePill = document.getElementById('modePill');
-  modePill.textContent = isLive ? 'LIVE' : 'Historical';
+  modePill.textContent = isLive ? 'LIVE' : (isMl ? 'ML TRAINING' : 'Historical');
   modePill.classList.toggle('live', isLive);
 
   if (isLive) {
@@ -429,9 +539,16 @@ function switchTab(tab) {
       clearInterval(refreshInterval);
       refreshInterval = null;
     }
-    loadData();
+    // If we just clicked ML, reload to match filter or just rely on existing data
+    if (isMl) {
+       clearSelection();
+       updateChartForML();
+    } else {
+       loadData();
+    }
   }
 }
+
 
 function resetRefreshTimer() {
   if (refreshInterval) clearInterval(refreshInterval);
@@ -439,6 +556,101 @@ function resetRefreshTimer() {
     const rate = parseInt(document.getElementById('refreshRate').value);
     refreshInterval = setInterval(loadData, rate);
   }
+}
+
+
+let selectionStartIdx = null;
+let selectionEndIdx = null;
+let isDragging = false;
+
+function updateChartForML() {
+   motionChart.update('none');
+}
+
+function clearSelection() {
+   selectionStartIdx = null;
+   selectionEndIdx = null;
+   motionChart.update('none');
+}
+
+async function applyLabel() {
+   if (selectionStartIdx === null || selectionEndIdx === null) {
+      alert("Please select a region on the chart first.");
+      return;
+   }
+   const sIdx = Math.min(selectionStartIdx, selectionEndIdx);
+   const eIdx = Math.max(selectionStartIdx, selectionEndIdx);
+   
+   const meta = motionChart.getDatasetMeta(0);
+   if (!meta.data || sIdx < 0 || eIdx >= meta.data.length || !window.loadedRows) return;
+   
+   const labelVal = document.querySelector('input[name="subState"]:checked').value;
+   const rowKeys = [];
+   for (let i = sIdx; i <= eIdx; i++) {
+        const r = window.loadedRows[i];
+        if (r && r.ts_ms) {
+            rowKeys.push(r.boot_id + "_" + r.seq_no + "_" + r.ts_ms);
+            r.sub_state = labelVal;
+        }
+   }
+   
+   if (rowKeys.length === 0) return;
+   
+   document.getElementById('status').textContent = 'Applying label to ' + rowKeys.length + ' samples...';
+   
+   try {
+       const res = await fetch(BASE + '/api/label', {
+           method: 'PATCH',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({
+               device_id: document.getElementById('deviceId').value,
+               row_keys: rowKeys,
+               sub_state: labelVal
+           })
+       });
+       if (!res.ok) throw new Error("Failed to label");
+       
+       clearSelection();
+       updateStats(window.loadedRows);
+       document.getElementById('status').textContent = 'Successfully labelled ' + rowKeys.length + ' samples.';
+   } catch (e) {
+       document.getElementById('status').textContent = 'Label Error: ' + e.message;
+   }
+}
+
+function downloadLabelledCSV() {
+   if (!window.loadedRows) return;
+   const rows = window.loadedRows.filter(r => r.sub_state);
+   if (rows.length === 0) {
+      alert("No data is labelled yet.");
+      return;
+   }
+   const newline = String.fromCharCode(10);
+   const header = Object.keys(rows[0]).join(",") + newline;
+   const csv = rows.map(r => Object.values(r).join(",")).join(newline);
+   const blob = new Blob([header + csv], { type: "text/csv" });
+   const url = window.URL.createObjectURL(blob);
+   const a = document.createElement("a");
+   a.href = url;
+   a.download = "washer_labelled_samples.csv";
+   a.click();
+   window.URL.revokeObjectURL(url);
+}
+
+function updateStats(rows) {
+    if(!rows || !rows.length) return;
+    document.getElementById('statTotal').textContent = rows.length;
+    const motions = rows.map(r=>r.motion_score);
+    const avg = motions.reduce((a,b)=>a+b,0)/motions.length;
+    document.getElementById('statMotionAvg').textContent = avg.toFixed(1);
+    document.getElementById('statMotionMax').textContent = Math.max(...motions).toFixed(1);
+    const running = rows.filter(r=>(r.overall_state||r.state)==='RUNNING').length;
+    document.getElementById('statRunning').textContent = (running/rows.length*100).toFixed(1)+'%';
+    
+    if (document.getElementById('statUnlabelled')) {
+       const unlabelled = rows.filter(r=>!r.sub_state).length;
+       document.getElementById('statUnlabelled').textContent = unlabelled;
+    }
 }
 
 function buildQuery() {
@@ -482,22 +694,15 @@ async function loadData() {
     const data = await res.json();
     const rows = data.samples || [];
     rows.reverse();
+    window.loadedRows = rows;
+
+    updateStats(rows);
 
     st.textContent = rows.length + ' samples loaded @ ' + new Date().toLocaleTimeString();
+
     if (currentTab === 'live') {
       const rate = document.getElementById('refreshRate').value / 1000;
       st.textContent += ' (Next refresh in ' + rate + 's)';
-    }
-
-    // stats
-    document.getElementById('statTotal').textContent = rows.length;
-    if(rows.length) {
-      const motions = rows.map(r=>r.motion_score);
-      const avg = motions.reduce((a,b)=>a+b,0)/motions.length;
-      document.getElementById('statMotionAvg').textContent = avg.toFixed(1);
-      document.getElementById('statMotionMax').textContent = Math.max(...motions).toFixed(1);
-      const running = rows.filter(r=>r.state==='RUNNING').length;
-      document.getElementById('statRunning').textContent = (running/rows.length*100).toFixed(1)+'%';
     }
 
     // charts
@@ -525,6 +730,45 @@ function downloadCSV() {
   q.set('format','csv');
   window.open(BASE+'/api/samples?'+q, '_blank');
 }
+
+
+  // Add chart interaction for ML selection
+  const canvas = document.getElementById('chartMotion');
+  canvas.addEventListener('mousedown', (e) => {
+     if (currentTab !== 'ml') return;
+     const rect = canvas.getBoundingClientRect();
+     const x = e.clientX - rect.left;
+     
+     const meta = motionChart.getDatasetMeta(0);
+     let closestIndex = 0;
+     let minDiff = Infinity;
+     for (let i = 0; i < meta.data.length; i++) {
+        const dx = Math.abs(meta.data[i].x - x);
+        if (dx < minDiff) { minDiff = dx; closestIndex = i; }
+     }
+     selectionStartIdx = closestIndex;
+     selectionEndIdx = closestIndex;
+     isDragging = true;
+     motionChart.update('none');
+  });
+  
+  canvas.addEventListener('mousemove', (e) => {
+     if (!isDragging || currentTab !== 'ml') return;
+     const rect = canvas.getBoundingClientRect();
+     const x = e.clientX - rect.left;
+     
+     const meta = motionChart.getDatasetMeta(0);
+     let closestIndex = 0;
+     let minDiff = Infinity;
+     for (let i = 0; i < meta.data.length; i++) {
+        const dx = Math.abs(meta.data[i].x - x);
+        if (dx < minDiff) { minDiff = dx; closestIndex = i; }
+     }
+     selectionEndIdx = closestIndex;
+     motionChart.update('none');
+  });
+  
+  canvas.addEventListener('mouseup', () => { isDragging = false; });
 
 initCharts();
 loadData(); // Initial load
