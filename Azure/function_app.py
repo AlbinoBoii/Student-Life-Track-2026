@@ -326,13 +326,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <h1>⚙ Dra-Washer Monitor</h1>
   <div style="display:flex;align-items:center;gap:0.5rem;">
     <div class="spinner" id="spinner"></div>
-    <span class="pill" id="modePill">Historical</span>
+    <div style="display:flex;align-items:center;gap:0.5rem;">
+      <div id="statusDot" style="width:10px;height:10px;border-radius:50%;background:#22c55e;transition:background 0.3s;"></div>
+      <span class="pill" id="modePill">Historical</span>
+    </div>
   </div>
 </nav>
 
 <div class="tabs">
-  <button class="tab-btn active" id="tabHist" onclick="switchTab('hist')">Historical Data</button>
-  <button class="tab-btn" id="tabLive" onclick="switchTab('live')">Live</button>
+  <button class="tab-btn active" id="tabLive" onclick="switchTab('live')">Live</button>
+  <button class="tab-btn" id="tabHist" onclick="switchTab('hist')">Historical Data</button>
   <button class="tab-btn" id="tabMl" onclick="switchTab('ml')">ML Training</button>
 </div>
 
@@ -375,16 +378,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </div>
 
 
-<div class="controls hidden" id="mlControls">
-  <div class="field" style="flex-direction:row; align-items:center;">
-    <label style="margin-right:1rem;">Label Selection:</label>
-    <input type="radio" name="subState" id="ssIdle" value="IDLE" checked><label for="ssIdle" style="margin-right:1rem; cursor:pointer;">IDLE</label>
-    <input type="radio" name="subState" id="ssWash" value="WASH"><label for="ssWash" style="margin-right:1rem; cursor:pointer;">WASH</label>
-    <input type="radio" name="subState" id="ssSpin" value="SPINDRY"><label for="ssSpin" style="cursor:pointer;">SPINDRY</label>
+<div class="controls hidden" id="mlControls" style="flex-direction:column; align-items:center; gap: 1rem;">
+  <div class="field" style="flex-direction:row; align-items:center; justify-content:center; gap: 1rem;">
+    <label>Label Selection:</label>
+    <input type="radio" name="subState" id="ssIdle" value="IDLE" checked><label for="ssIdle" style="cursor:pointer; margin:0;">IDLE</label>
+    <input type="radio" name="subState" id="ssWash" value="WASH"><label for="ssWash" style="cursor:pointer; margin:0; margin-right:0.5rem;">WASH</label>
+    <input type="radio" name="subState" id="ssSpin" value="SPINDRY"><label for="ssSpin" style="cursor:pointer; margin:0;">SPINDRY</label>
   </div>
-  <button class="btn btn-primary" onclick="applyLabel()">Apply Label</button>
-  <button class="btn btn-secondary" onclick="clearSelection()">Clear Selection</button>
-  <button class="btn btn-secondary" onclick="downloadLabelledCSV()">⬇ Labelled CSV</button>
+  <div style="display:flex; gap:0.75rem; flex-wrap:wrap; justify-content:center;">
+    <button class="btn btn-primary" onclick="loadData()">📂 Load Data</button>
+    <button class="btn btn-primary" onclick="applyLabel()">Apply Label</button>
+    <button class="btn btn-secondary" onclick="clearSelection()">Clear Selection</button>
+    <button class="btn btn-secondary" onclick="downloadLabelledCSV()">⬇ Labelled CSV</button>
+  </div>
 </div>
 
 <p id="status"></p>
@@ -395,6 +401,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <div class="stat"><div class="val" id="statMotionMax">—</div><div class="lbl">Max Motion</div></div>
   <div class="stat"><div class="val" id="statRunning">—</div><div class="lbl">Running %</div></div>
   <div class="stat"><div class="val" id="statUnlabelled">—</div><div class="lbl">Unlabelled</div></div>
+  <div class="stat"><div class="val" id="statLastReceived">—</div><div class="lbl">Last Received</div></div>
 </div>
 
 <div class="grid">
@@ -405,7 +412,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <script>
 const BASE = window.location.origin;
 let motionChart, accelChart;
-let currentTab = 'hist';
+let currentTab = 'live';
 let refreshInterval = null;
 
 function initCharts() {
@@ -646,10 +653,32 @@ function updateStats(rows) {
     document.getElementById('statMotionMax').textContent = Math.max(...motions).toFixed(1);
     const running = rows.filter(r=>(r.overall_state||r.state)==='RUNNING').length;
     document.getElementById('statRunning').textContent = (running/rows.length*100).toFixed(1)+'%';
-    
+
     if (document.getElementById('statUnlabelled')) {
        const unlabelled = rows.filter(r=>!r.sub_state).length;
        document.getElementById('statUnlabelled').textContent = unlabelled;
+    }
+
+    // Update last received timestamp and device status
+    if (rows.length > 0) {
+        const lastRow = rows[rows.length - 1];
+        const lastReceivedTime = new Date(lastRow.received_at);
+        const formattedTime = lastReceivedTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+        document.getElementById('statLastReceived').textContent = formattedTime;
+
+        // Update device status indicator
+        const now = new Date();
+        const ageMs = now - lastReceivedTime;
+        const ageMins = ageMs / 60000;
+        const dot = document.getElementById('statusDot');
+
+        if (ageMins < 2) {
+            dot.style.background = '#22c55e'; // Green - online
+        } else if (ageMins < 5) {
+            dot.style.background = '#f59e0b'; // Orange - warning
+        } else {
+            dot.style.background = '#ef4444'; // Red - offline
+        }
     }
 }
 
@@ -771,7 +800,7 @@ function downloadCSV() {
   canvas.addEventListener('mouseup', () => { isDragging = false; });
 
 initCharts();
-loadData(); // Initial load
+switchTab('live'); // Initialize with Live tab active
 </script>
 </body>
 </html>"""

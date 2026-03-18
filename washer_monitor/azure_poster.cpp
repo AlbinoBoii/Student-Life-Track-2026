@@ -142,9 +142,9 @@ void flushAzureBatch() {
     json += String(sampleBuf[i].motion, 2);
     json += ",\"motion_avg\":";
     json += String(sampleBuf[i].motion_avg, 2);
-    json += ",\"state\":\"";
+    json += ",\"overall_state\":\"";
     json += sampleBuf[i].state;
-    json += "\",\"wifi_rssi_dbm\":";
+    json += "\",\"sub_state\":\"\",\"wifi_rssi_dbm\":";
     json += String(sampleBuf[i].rssi);
     json += "}";
   }

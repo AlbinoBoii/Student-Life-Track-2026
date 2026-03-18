@@ -9,7 +9,7 @@ static unsigned long lastSerialLogMs = 0;
 void serialLoggerBegin() {
   if (!SERIAL_LOG_ENABLED) return;
 
-  Serial.println("CSV_HEADER,esp_ms,ax,ay,az,motion,state");
+  Serial.println("CSV_HEADER,esp_ms,ax,ay,az,motion,overall_state,sub_state");
 }
 
 void serialLoggerLogSample() {
@@ -32,5 +32,6 @@ void serialLoggerLogSample() {
   Serial.print(",");
   Serial.print(s.motion, 2);
   Serial.print(",");
-  Serial.println(washerStateName());
+  Serial.print(washerStateName());
+  Serial.println(",");
 }
