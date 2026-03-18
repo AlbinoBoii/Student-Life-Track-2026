@@ -324,11 +324,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
 <nav class="navbar">
   <h1>⚙ Dra-Washer Monitor</h1>
-  <div style="display:flex;align-items:center;gap:0.5rem;">
+  <div style="display:flex;align-items:center;gap:1rem;">
     <div class="spinner" id="spinner"></div>
-    <div style="display:flex;align-items:center;gap:0.5rem;">
-      <div id="statusDot" style="width:10px;height:10px;border-radius:50%;background:#22c55e;transition:background 0.3s;"></div>
-      <span class="pill" id="modePill">Historical</span>
+    <span class="pill" id="modePill">Historical</span>
+    <div style="display:flex;align-items:center;gap:0.5rem;font-weight:600;font-size:0.85rem;">
+      <div id="statusDot" style="width:8px;height:8px;border-radius:50%;background:#22c55e;transition:background 0.3s;"></div>
+      <span id="statusText" style="color:#22c55e;transition:color 0.3s;">Online</span>
     </div>
   </div>
 </nav>
@@ -414,6 +415,7 @@ const BASE = window.location.origin;
 let motionChart, accelChart;
 let currentTab = 'live';
 let refreshInterval = null;
+let lastKnownStatus = 'online'; // Track previous status to avoid flipping
 
 function initCharts() {
   const shared = {responsive:true,animation:{duration:300},scales:{
@@ -666,18 +668,36 @@ function updateStats(rows) {
         const formattedTime = lastReceivedTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
         document.getElementById('statLastReceived').textContent = formattedTime;
 
-        // Update device status indicator
+        // Update device status with hysteresis to prevent flipping
         const now = new Date();
         const ageMs = now - lastReceivedTime;
         const ageMins = ageMs / 60000;
         const dot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
 
-        if (ageMins < 2) {
-            dot.style.background = '#22c55e'; // Green - online
-        } else if (ageMins < 5) {
-            dot.style.background = '#f59e0b'; // Orange - warning
-        } else {
-            dot.style.background = '#ef4444'; // Red - offline
+        let newStatus = lastKnownStatus; // Keep previous status by default
+
+        // Go online if fresh data (< 5 mins)
+        if (ageMins < 5) {
+            newStatus = 'online';
+        }
+        // Go offline only if stale (> 10 mins)
+        else if (ageMins > 10) {
+            newStatus = 'offline';
+        }
+
+        // Update UI only if status changed
+        if (newStatus !== lastKnownStatus) {
+            lastKnownStatus = newStatus;
+            if (newStatus === 'online') {
+                dot.style.background = '#22c55e';
+                statusText.textContent = 'Online';
+                statusText.style.color = '#22c55e';
+            } else {
+                dot.style.background = '#ef4444';
+                statusText.textContent = 'Offline';
+                statusText.style.color = '#ef4444';
+            }
         }
     }
 }
