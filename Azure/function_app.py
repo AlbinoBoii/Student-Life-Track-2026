@@ -158,7 +158,7 @@ def _aggregate_rows(rows, aggregate_str):
 
     # Aggregate each bucket
     aggregated = []
-    for bucket_key in sorted(buckets.keys()):
+    for bucket_key in sorted(buckets.keys(), reverse=True):
         bucket_rows = buckets[bucket_key]
         n = len(bucket_rows)
 

@@ -30,6 +30,7 @@ A complete end-to-end IoT solution that transforms your **ordinary washing machi
 - [System Architecture](#system-architecture)
 - [Getting Started](#getting-started)
 - [Using the Dashboard](#using-the-dashboard)
+- [Data Analysis & Aggregation](#-data-analysis--aggregation)
 - [ML Training Pipeline](#ml-training-pipeline)
 - [Project Structure](#project-structure)
 - [Troubleshooting](#troubleshooting)
@@ -240,6 +241,166 @@ What Each Label Means:
 
 ---
 
+## 📊 Data Analysis & Aggregation
+
+### Time-Based Aggregation
+
+Compress large datasets into meaningful time buckets for trend analysis:
+
+```
+Query: GET /api/samples?device_id=ESP32&aggregate=5m&format=json
+
+Response:
+{
+  "count": 288,
+  "aggregated": true,
+  "bucket_size": "5m",
+  "samples": [
+    {
+      "ts_ms": 1710748800000,
+      "motion_score_avg": 2.45,
+      "motion_score_min": 0.1,
+      "motion_score_max": 8.2,
+      "ax_avg": 0.15, "ax_min": -1.2, "ax_max": 1.1,
+      "ay_avg": -0.05, "ay_min": -0.8, "ay_max": 0.9,
+      "az_avg": 9.82, "az_min": 9.5, "az_max": 10.1,
+      "motion_avg_avg": 1.8,
+      "sample_count": 300,
+      "running_percent": 45.5,
+      "sub_state_modes": {"IDLE": 120, "WASH": 150, "SPINDRY": 30}
+    },
+    ...
+  ]
+}
+```
+
+#### Supported Aggregation Intervals
+
+| Interval | Use Case | Typical Points for 24h |
+|----------|----------|------------------------|
+| `1m` | Fine-grained analysis | 1,440 |
+| `5m` | Cycle detection patterns | 288 |
+| `15m` | Daily trends | 96 |
+| `1h` | Long-term statistics | 24 |
+
+**What Gets Aggregated:**
+- **Motion metrics**: average, min, max of motion_score and motion_avg
+- **Accelerometer axes**: average, min, max for ax, ay, az
+- **State analysis**: percentage of time in RUNNING state
+- **Sub-state distribution**: count of IDLE/WASH/SPINDRY samples
+- **Sample metadata**: total samples in bucket
+
+### Device Health Monitoring
+
+Get comprehensive device uptime and reliability metrics:
+
+```bash
+# Query device health for last 7 days
+curl "https://<your-function>/api/device-health?device_id=ESP32&days=7"
+```
+
+Response includes:
+
+```json
+{
+  "device_id": "ESP32",
+  "total_uptime_seconds": 604800,
+  "uptime_percent": 98.5,
+  "total_boots": 2,
+  "boot_events": [
+    {
+      "boot_id": "abc123",
+      "boot_ts": "2026-03-11T10:00:00+00:00",
+      "samples_count": 15000,
+      "last_activity": "2026-03-12T14:30:00+00:00"
+    }
+  ],
+  "data_gaps": [
+    {
+      "start": "2026-03-12T05:00:00+00:00",
+      "end": "2026-03-12T05:45:00+00:00",
+      "duration_seconds": 2700,
+      "reason": "No data (likely offline or power loss)"
+    }
+  ],
+  "wifi_signal_stats": {
+    "avg_rssi": -67,
+    "min_rssi": -85,
+    "max_rssi": -45,
+    "samples_with_signal": 14500
+  },
+  "last_contact": {
+    "timestamp": "2026-03-18T14:22:15+00:00",
+    "age_seconds": 45,
+    "status": "online"
+  }
+}
+```
+
+**Health Metrics Explained:**
+- **uptime_percent**: % of observation period device was actively sending data
+- **total_boots**: Number of device restarts detected
+- **data_gaps**: Periods > 5 minutes without activity (potential issues)
+- **wifi_signal_stats**: WiFi signal strength (RSSI) in dBm
+  - `-67 dBm`: Strong signal
+  - `-85 dBm`: Weak signal (consider repositioning)
+- **last_contact**: When device was last heard from; "offline" if > 10 minutes
+
+### Export Data for Analysis
+
+#### CSV Export
+
+```bash
+# Download 24h of aggregated data as CSV
+curl "https://<your-function>/api/samples?device_id=ESP32&aggregate=1h&format=csv&since=2026-03-18T00:00:00Z&until=2026-03-19T00:00:00Z" \
+  > washer_analysis.csv
+```
+
+The CSV includes all aggregated columns and is ready for import into Excel, Python, or Tableau.
+
+#### JSON Export (Large Datasets)
+
+```bash
+# Raw JSON with full detail (can handle large responses)
+curl "https://<your-function>/api/samples?device_id=ESP32&format=json&limit=50000"
+```
+
+### Practical Examples
+
+#### Track Washing Machine Usage Over Time
+
+```bash
+# Get hourly aggregation for the past week
+curl "https://<your-function>/api/samples?device_id=ESP32&aggregate=1h&since=2026-03-11T00:00:00Z"
+```
+
+Use this to:
+- Identify peak laundry times
+- Calculate total RUNNING time per day
+- Spot anomalies in vibration patterns
+
+#### Monitor Device Reliability
+
+```bash
+# Check if device is healthy
+curl "https://<your-function>/api/device-health?device_id=ESP32&days=30"
+```
+
+Look for:
+- `uptime_percent` > 95% (acceptable)
+- No large `data_gaps`
+- Consistent WiFi signal (`avg_rssi` > -75 dBm)
+- Recent `last_contact` (< 1 minute if running)
+
+#### Diagnose Offline Events
+
+```bash
+# See exactly when and why device went offline
+curl "https://<your-function>/api/device-health?device_id=ESP32&days=7" | jq '.data_gaps'
+```
+
+---
+
 ## 🤖 ML Training Pipeline
 
 ### Overview
@@ -352,7 +513,6 @@ Each re-training improves accuracy!
 Student-Life-Track-2026/
 │
 ├── 📄 README.md                      ← You are here!
-├── 📄 PROJECT_STORY.md               ← Hackathon pitch
 │
 ├── 🔷 Azure/
 │   ├── function_app.py               ← Cloud backend (POST/GET/PATCH endpoints)
@@ -489,7 +649,6 @@ The `train_model.py` script can be extended to:
 
 ## 📚 Learning Resources
 
-- **IoT Architecture**: See PROJECT_STORY.md for design decisions
 - **Signal Processing**: Read about EMA filters and motion detection
 - **ML Fundamentals**: Random Forest classifiers, cross-validation, feature importance
 - **Embedded Systems**: Arduino IDE, ESP32 capabilities, I2C protocol
@@ -507,12 +666,6 @@ We welcome contributions! Areas for improvement:
 - [ ] Energy consumption tracking
 - [ ] Automated data collection heuristics
 - [ ] Better feature engineering pipeline
-
----
-
-## 📝 License
-
-[Your License Here]
 
 ---
 
