@@ -4,3 +4,4 @@
 void initAzurePoster();
 void bufferSampleForAzure();
 void flushAzureBatch();
+   

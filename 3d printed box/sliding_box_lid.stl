@@ -1,0 +1,86 @@
+solid sliding_box_lid_corrected
+  facet normal 0.000000e+00 0.000000e+00 1.000000e+00
+    outer loop
+      vertex 4.300000e+00 2.300000e+00 2.160000e+01
+      vertex 6.070000e+01 2.300000e+00 2.160000e+01
+      vertex 6.070000e+01 6.470000e+01 2.160000e+01
+    endloop
+  endfacet
+  facet normal 0.000000e+00 0.000000e+00 1.000000e+00
+    outer loop
+      vertex 4.300000e+00 2.300000e+00 2.160000e+01
+      vertex 6.070000e+01 6.470000e+01 2.160000e+01
+      vertex 4.300000e+00 6.470000e+01 2.160000e+01
+    endloop
+  endfacet
+  facet normal 0.000000e+00 0.000000e+00 -1.000000e+00
+    outer loop
+      vertex 4.300000e+00 2.300000e+00 2.360000e+01
+      vertex 4.300000e+00 6.470000e+01 2.360000e+01
+      vertex 6.070000e+01 6.470000e+01 2.360000e+01
+    endloop
+  endfacet
+  facet normal 0.000000e+00 0.000000e+00 -1.000000e+00
+    outer loop
+      vertex 4.300000e+00 2.300000e+00 2.360000e+01
+      vertex 6.070000e+01 6.470000e+01 2.360000e+01
+      vertex 6.070000e+01 2.300000e+00 2.360000e+01
+    endloop
+  endfacet
+  facet normal 1.000000e+00 0.000000e+00 0.000000e+00
+    outer loop
+      vertex 4.300000e+00 2.300000e+00 2.160000e+01
+      vertex 4.300000e+00 6.470000e+01 2.160000e+01
+      vertex 4.300000e+00 6.470000e+01 2.360000e+01
+    endloop
+  endfacet
+  facet normal 1.000000e+00 0.000000e+00 0.000000e+00
+    outer loop
+      vertex 4.300000e+00 2.300000e+00 2.160000e+01
+      vertex 4.300000e+00 6.470000e+01 2.360000e+01
+      vertex 4.300000e+00 2.300000e+00 2.360000e+01
+    endloop
+  endfacet
+  facet normal -1.000000e+00 0.000000e+00 0.000000e+00
+    outer loop
+      vertex 6.070000e+01 2.300000e+00 2.160000e+01
+      vertex 6.070000e+01 2.300000e+00 2.360000e+01
+      vertex 6.070000e+01 6.470000e+01 2.360000e+01
+    endloop
+  endfacet
+  facet normal -1.000000e+00 0.000000e+00 0.000000e+00
+    outer loop
+      vertex 6.070000e+01 2.300000e+00 2.160000e+01
+      vertex 6.070000e+01 6.470000e+01 2.360000e+01
+      vertex 6.070000e+01 6.470000e+01 2.160000e+01
+    endloop
+  endfacet
+  facet normal 0.000000e+00 1.000000e+00 0.000000e+00
+    outer loop
+      vertex 4.300000e+00 2.300000e+00 2.160000e+01
+      vertex 4.300000e+00 2.300000e+00 2.360000e+01
+      vertex 6.070000e+01 2.300000e+00 2.360000e+01
+    endloop
+  endfacet
+  facet normal 0.000000e+00 1.000000e+00 0.000000e+00
+    outer loop
+      vertex 4.300000e+00 2.300000e+00 2.160000e+01
+      vertex 6.070000e+01 2.300000e+00 2.360000e+01
+      vertex 6.070000e+01 2.300000e+00 2.160000e+01
+    endloop
+  endfacet
+  facet normal 0.000000e+00 -1.000000e+00 0.000000e+00
+    outer loop
+      vertex 4.300000e+00 6.470000e+01 2.160000e+01
+      vertex 6.070000e+01 6.470000e+01 2.160000e+01
+      vertex 6.070000e+01 6.470000e+01 2.360000e+01
+    endloop
+  endfacet
+  facet normal 0.000000e+00 -1.000000e+00 0.000000e+00
+    outer loop
+      vertex 4.300000e+00 6.470000e+01 2.160000e+01
+      vertex 6.070000e+01 6.470000e+01 2.360000e+01
+      vertex 4.300000e+00 6.470000e+01 2.360000e+01
+    endloop
+  endfacet
+endsolid sliding_box_lid_corrected
