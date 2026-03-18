@@ -122,8 +122,256 @@ def ingest(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ---------------------------------------------------------------------------
-# GET /api/samples
+# Helper: Aggregate rows by time bucket
 # ---------------------------------------------------------------------------
+
+def _aggregate_rows(rows, aggregate_str):
+    """
+    Group rows into time buckets and return aggregated statistics.
+
+    aggregate_str: '1m', '5m', '15m', '1h'
+    Returns: list of aggregated bucket dicts
+    """
+    bucket_ms_map = {
+        '1m': 60_000,
+        '5m': 300_000,
+        '15m': 900_000,
+        '1h': 3_600_000,
+    }
+
+    bucket_ms = bucket_ms_map.get(aggregate_str)
+    if not bucket_ms:
+        return rows  # Invalid aggregate, return raw
+
+    if not rows:
+        return []
+
+    # Group by bucket
+    buckets = {}
+    for row in rows:
+        ts_ms = row.get('ts_ms', 0)
+        bucket_key = (ts_ms // bucket_ms) * bucket_ms
+
+        if bucket_key not in buckets:
+            buckets[bucket_key] = []
+        buckets[bucket_key].append(row)
+
+    # Aggregate each bucket
+    aggregated = []
+    for bucket_key in sorted(buckets.keys()):
+        bucket_rows = buckets[bucket_key]
+        n = len(bucket_rows)
+
+        # Motion stats
+        motion_scores = [r.get('motion_score', 0) for r in bucket_rows]
+        motion_avgs = [r.get('motion_avg', 0) for r in bucket_rows]
+
+        # Accelerometer stats
+        ax_vals = [r.get('ax', 0) for r in bucket_rows]
+        ay_vals = [r.get('ay', 0) for r in bucket_rows]
+        az_vals = [r.get('az', 0) for r in bucket_rows]
+
+        # State stats
+        running_count = sum(1 for r in bucket_rows if (r.get('overall_state') or r.get('state', '')).upper() == 'RUNNING')
+        running_percent = (running_count / n * 100) if n > 0 else 0
+
+        # Sub-state distribution
+        sub_state_modes = {'IDLE': 0, 'WASH': 0, 'SPINDRY': 0, '': 0}
+        for r in bucket_rows:
+            sub = r.get('sub_state', '')
+            if sub in sub_state_modes:
+                sub_state_modes[sub] += 1
+            else:
+                sub_state_modes[''] += 1
+
+        aggregated_row = {
+            'ts_ms': bucket_key,
+            'motion_score_avg': sum(motion_scores) / n if motion_scores else 0,
+            'motion_score_min': min(motion_scores) if motion_scores else 0,
+            'motion_score_max': max(motion_scores) if motion_scores else 0,
+            'ax_avg': sum(ax_vals) / n if ax_vals else 0,
+            'ax_min': min(ax_vals) if ax_vals else 0,
+            'ax_max': max(ax_vals) if ax_vals else 0,
+            'ay_avg': sum(ay_vals) / n if ay_vals else 0,
+            'ay_min': min(ay_vals) if ay_vals else 0,
+            'ay_max': max(ay_vals) if ay_vals else 0,
+            'az_avg': sum(az_vals) / n if az_vals else 0,
+            'az_min': min(az_vals) if az_vals else 0,
+            'az_max': max(az_vals) if az_vals else 0,
+            'motion_avg_avg': sum(motion_avgs) / n if motion_avgs else 0,
+            'sample_count': n,
+            'running_percent': running_percent,
+            'sub_state_modes': sub_state_modes,
+        }
+        aggregated.append(aggregated_row)
+
+    return aggregated
+
+
+# ---------------------------------------------------------------------------
+# Helper: Calculate device health metrics
+# ---------------------------------------------------------------------------
+
+def _calculate_device_health(device_id, days=7):
+    """
+    Calculate device health metrics: uptime, boot events, data gaps, WiFi stats.
+
+    Returns dict with health metrics or error response.
+    """
+    from datetime import timedelta, timezone
+
+    # Query all samples for this device in the date range
+    table = _get_table_client()
+    now = datetime.now(timezone.utc)
+    lookback_date = (now - timedelta(days=days)).isoformat()
+
+    # OData filter for device and date range
+    odata_filter = f"PartitionKey eq '{device_id}' and received_at ge '{lookback_date}'"
+
+    try:
+        entities = list(table.query_entities(odata_filter))
+    except Exception as e:
+        logging.error(f"Query error in device health: {e}")
+        return {"error": str(e), "device_id": device_id}
+
+    if not entities:
+        return {
+            "device_id": device_id,
+            "total_uptime_seconds": 0,
+            "uptime_percent": 0,
+            "total_boots": 0,
+            "boot_events": [],
+            "data_gaps": [],
+            "wifi_signal_stats": {"avg_rssi": 0, "min_rssi": 0, "max_rssi": 0, "samples_with_signal": 0},
+            "last_contact": {"timestamp": None, "age_seconds": 0, "status": "offline"},
+        }
+
+    # Sort by received_at
+    entities.sort(key=lambda x: x.get("received_at", ""))
+
+    # Group by boot_id to identify boot events
+    boot_groups = {}
+    for entity in entities:
+        boot_id = entity.get("boot_id", "unknown")
+        if boot_id not in boot_groups:
+            boot_groups[boot_id] = []
+        boot_groups[boot_id].append(entity)
+
+    # Calculate boot events
+    boot_events = []
+    for boot_id, boot_samples in boot_groups.items():
+        if boot_samples:
+            first_ts = min(s.get("received_at", "") for s in boot_samples)
+            last_ts = max(s.get("received_at", "") for s in boot_samples)
+            boot_events.append({
+                "boot_id": boot_id,
+                "boot_ts": first_ts,
+                "samples_count": len(boot_samples),
+                "last_activity": last_ts,
+            })
+
+    boot_events.sort(key=lambda x: x.get("boot_ts", ""))
+
+    # Calculate data gaps (> 5 minutes without data)
+    data_gaps = []
+    gap_threshold = 5 * 60  # 5 minutes in seconds
+
+    for i in range(len(entities) - 1):
+        current_ts = datetime.fromisoformat(entities[i].get("received_at", "").replace("Z", "+00:00"))
+        next_ts = datetime.fromisoformat(entities[i + 1].get("received_at", "").replace("Z", "+00:00"))
+
+        gap_seconds = (next_ts - current_ts).total_seconds()
+        if gap_seconds > gap_threshold:
+            data_gaps.append({
+                "start": entities[i].get("received_at", ""),
+                "end": entities[i + 1].get("received_at", ""),
+                "duration_seconds": int(gap_seconds),
+                "reason": "No data (likely offline or power loss)"
+            })
+
+    # Calculate WiFi stats
+    wifi_signals = []
+    for entity in entities:
+        rssi = entity.get("wifi_rssi_dbm")
+        if rssi is not None and rssi != "":
+            try:
+                wifi_signals.append(int(rssi) if isinstance(rssi, int) else int(float(rssi)))
+            except (ValueError, TypeError):
+                pass
+
+    wifi_stats = {
+        "avg_rssi": round(sum(wifi_signals) / len(wifi_signals), 1) if wifi_signals else 0,
+        "min_rssi": min(wifi_signals) if wifi_signals else 0,
+        "max_rssi": max(wifi_signals) if wifi_signals else 0,
+        "samples_with_signal": len(wifi_signals),
+    }
+
+    # Calculate total uptime
+    first_ts = datetime.fromisoformat(entities[0].get("received_at", "").replace("Z", "+00:00"))
+    last_ts = datetime.fromisoformat(entities[-1].get("received_at", "").replace("Z", "+00:00"))
+    total_span_seconds = (last_ts - first_ts).total_seconds()
+
+    # Uptime = total span - gaps
+    gap_seconds_total = sum(g["duration_seconds"] for g in data_gaps)
+    uptime_seconds = max(0, total_span_seconds - gap_seconds_total)
+    uptime_percent = (uptime_seconds / total_span_seconds * 100) if total_span_seconds > 0 else 0
+
+    # Last contact
+    last_contact_ts = entities[-1].get("received_at", "")
+    last_contact_dt = datetime.fromisoformat(last_contact_ts.replace("Z", "+00:00"))
+    age_seconds = int((now - last_contact_dt).total_seconds())
+
+    # Determine status
+    status = "online" if age_seconds < 600 else "offline"  # 10 minutes
+
+    return {
+        "device_id": device_id,
+        "total_uptime_seconds": int(uptime_seconds),
+        "uptime_percent": round(uptime_percent, 1),
+        "total_boots": len(boot_events),
+        "boot_events": boot_events,
+        "data_gaps": data_gaps,
+        "wifi_signal_stats": wifi_stats,
+        "last_contact": {
+            "timestamp": last_contact_ts,
+            "age_seconds": age_seconds,
+            "status": status,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /api/device-health
+# ---------------------------------------------------------------------------
+
+@app.route(route="device-health", methods=["GET"])
+def device_health(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get device health and uptime metrics.
+
+    Query params:
+        device_id  – device identifier (required)
+        days       – lookback period in days (default 7, max 90)
+    """
+    device_id = req.params.get("device_id", "")
+    try:
+        days = min(int(req.params.get("days", "7")), 90)
+    except ValueError:
+        days = 7
+
+    if not device_id:
+        return func.HttpResponse(
+            json.dumps({"error": "device_id parameter required"}),
+            status_code=400,
+            mimetype="application/json",
+        )
+
+    health = _calculate_device_health(device_id, days)
+    return func.HttpResponse(
+        json.dumps(health),
+        mimetype="application/json",
+    )
+
 
 @app.route(route="samples", methods=["GET"])
 def samples(req: func.HttpRequest) -> func.HttpResponse:
@@ -135,15 +383,24 @@ def samples(req: func.HttpRequest) -> func.HttpResponse:
         since      – ISO timestamp lower bound
         until      – ISO timestamp upper bound
         state      – filter by washer state (IDLE / RUNNING)
-        limit      – max rows to return (default 1000, max 10000)
+        limit      – max raw samples (default 1000, max 30000). Ignored if aggregated.
         format     – 'json' (default) or 'csv'
+        aggregate  – time bucket interval ('1m', '5m', '15m', '1h')
     """
     device_id = req.params.get("device_id", "")
-    since = req.params.get("since", "")
-    until = req.params.get("until", "")
+    from_ts = req.params.get("from", "")
+    to_ts = req.params.get("to", "")
     state_filter = req.params.get("state", "")
-    limit = min(int(req.params.get("limit", "1000")), 10000)
+    limit = min(int(req.params.get("limit", "1000")), 30000)
     fmt = req.params.get("format", "json").lower()
+    aggregate = req.params.get("aggregate", "")
+
+    # Force 30k limit for raw data; aggregation uses its own internal logic
+    if not aggregate:
+        limit = min(limit, 30000)
+    else:
+        # For aggregation, we want to fetch more data, but still have a safety cap
+        limit = 100000 
 
     # Build OData filter
     filters = []
@@ -151,10 +408,10 @@ def samples(req: func.HttpRequest) -> func.HttpResponse:
         filters.append(f"PartitionKey eq '{device_id}'")
     if state_filter:
         filters.append(f"overall_state eq '{state_filter}'")
-    if since:
-        filters.append(f"received_at ge '{since}'")
-    if until:
-        filters.append(f"received_at le '{until}'")
+    if from_ts:
+        filters.append(f"received_at ge '{from_ts}'")
+    if to_ts:
+        filters.append(f"received_at le '{to_ts}'")
 
     odata_filter = " and ".join(filters) if filters else None
 
@@ -188,6 +445,10 @@ def samples(req: func.HttpRequest) -> func.HttpResponse:
             "received_at": entity.get("received_at", ""),
         })
 
+    # Apply aggregation if requested
+    if aggregate:
+        rows = _aggregate_rows(rows, aggregate)
+
     # --- CSV ---
     if fmt == "csv":
         if not rows:
@@ -207,8 +468,15 @@ def samples(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     # --- JSON ---
+    response = {
+        "count": len(rows),
+        "samples": rows,
+    }
+    if aggregate:
+        response["aggregated"] = True
+        response["bucket_size"] = aggregate
     return func.HttpResponse(
-        json.dumps({"count": len(rows), "samples": rows}),
+        json.dumps(response),
         mimetype="application/json",
     )
 
@@ -338,6 +606,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <button class="tab-btn active" id="tabLive" onclick="switchTab('live')">Live</button>
   <button class="tab-btn" id="tabHist" onclick="switchTab('hist')">Historical Data</button>
   <button class="tab-btn" id="tabMl" onclick="switchTab('ml')">ML Training</button>
+  <button class="tab-btn" id="tabDevice" onclick="switchTab('device')">Device Info</button>
 </div>
 
 <div class="controls">
@@ -345,13 +614,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <label>Device ID</label>
     <input id="deviceId" value="ESP32 Washer Monitor" placeholder="device id">
   </div>
-  <div class="field" id="fieldSince">
-    <label>Since</label>
-    <input id="since" type="datetime-local">
+  <div class="field" id="fieldFrom">
+    <label>FROM</label>
+    <input id="from" type="datetime-local">
   </div>
-  <div class="field" id="fieldUntil">
-    <label>Until</label>
-    <input id="until" type="datetime-local">
+  <div class="field" id="fieldTo">
+    <label>TO</label>
+    <input id="to" type="datetime-local">
   </div>
   <div class="field" id="fieldState">
     <label>State</label>
@@ -359,7 +628,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
   <div class="field">
     <label>Limit</label>
-    <input id="limit" type="number" value="1000" min="1" max="10000">
+    <input id="limit" type="number" value="1000" min="1" max="30000">
+    <span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 0.25rem;">(Raw only)</span>
+
+  </div>
+  <div class="field hidden" id="fieldAggregate">
+    <label>Aggregate By</label>
+    <select id="aggregateLevel">
+      <option value="">Raw Data</option>
+      <option value="1m">1 Minute</option>
+      <option value="5m">5 Minutes</option>
+      <option value="15m">15 Minutes</option>
+      <option value="1h">1 Hour</option>
+    </select>
   </div>
   <div class="field hidden" id="fieldRefresh">
     <label>Refresh Every</label>
@@ -394,6 +675,66 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 </div>
 
+<div class="controls hidden" id="deviceControls" style="flex-direction:column; align-items:stretch; gap: 1rem;">
+  <style>
+    .device-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+    .device-card { background: var(--surface); border: 1px solid var(--border); border-radius: 0.5rem; padding: 1rem; }
+    .device-card h3 { font-size: 0.85rem; color: var(--muted); margin: 0 0 0.5rem 0; text-transform: uppercase; letter-spacing: 0.05em; }
+    .device-card .value { font-size: 1.5rem; font-weight: 700; color: var(--accent); margin: 0.25rem 0; }
+    .device-card .label { font-size: 0.75rem; color: var(--muted); }
+    .timeline-toggle { display: flex; gap: 0.5rem; margin: 1rem 0; }
+    .timeline-toggle button { padding: 0.4rem 0.8rem; font-size: 0.85rem; background: var(--border); border: 1px solid var(--border); color: var(--text); border-radius: 0.375rem; cursor: pointer; transition: all 0.2s; }
+    .timeline-toggle button.active { background: var(--accent); color: #000; }
+    #deviceTimeline { width: 100%; height: 300px; }
+    #wifiChart { width: 100%; height: 250px; margin-top: 1rem; }
+    .uptime-high { color: #22c55e; } .uptime-medium { color: #f59e0b; } .uptime-low { color: #ef4444; }
+  </style>
+
+  <!-- Device Health Status Cards -->
+  <div class="device-status-grid" id="deviceHealthCards">
+    <div class="device-card">
+      <h3>Device Status</h3>
+      <div class="value" id="devStatus">—</div>
+      <div class="label" id="devLastContact">—</div>
+    </div>
+    <div class="device-card">
+      <h3>Uptime</h3>
+      <div class="value" id="devUptime">—</div>
+      <div class="label" id="devUptimePercent">—</div>
+    </div>
+    <div class="device-card">
+      <h3>Boot Count</h3>
+      <div class="value" id="devBootCount">—</div>
+      <div class="label" id="devLastBoot">—</div>
+    </div>
+    <div class="device-card">
+      <h3>WiFi Signal</h3>
+      <div class="value" id="devSignal">—</div>
+      <div class="label"><span id="devSignalStats">—</span></div>
+    </div>
+  </div>
+
+  <!-- Timeline Toggle -->
+  <div>
+    <label style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); display: block; margin-bottom: 0.5rem;">Device Timeline</label>
+    <div class="timeline-toggle">
+      <button class="btn-timeline-toggle active" id="btnTimelineVisual" onclick="toggleTimelineView('visual')">Visual Timeline</button>
+      <button class="btn-timeline-toggle" id="btnTimelineList" onclick="toggleTimelineView('list')">Event Log</button>
+    </div>
+    <div id="deviceTimeline" style="background: var(--surface); border: 1px solid var(--border); border-radius: 0.375rem; padding: 1rem;"></div>
+    <div id="deviceEventLog" hidden style="background: var(--surface); border: 1px solid var(--border); border-radius: 0.375rem; padding: 1rem;"></div>
+  </div>
+
+  <!-- WiFi Chart -->
+  <div>
+    <label style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); display: block; margin-bottom: 0.5rem;">WiFi Signal Strength</label>
+    <div id="wifiChart" style="background: var(--surface); border: 1px solid var(--border); border-radius: 0.375rem;"></div>
+  </div>
+
+  <!-- Refresh Button -->
+  <button class="btn btn-primary" onclick="loadDeviceHealth()" style="align-self: flex-start;">🔄 Refresh Device Info</button>
+</div>
+
 <p id="status"></p>
 
 <div class="stats">
@@ -416,6 +757,245 @@ let motionChart, accelChart;
 let currentTab = 'live';
 let refreshInterval = null;
 let lastKnownStatus = 'online'; // Track previous status to avoid flipping
+let timelineView = 'visual'; // Track timeline view mode
+let wifiChart = null;
+
+// =========================================================================
+// Device Health Functions
+// =========================================================================
+
+async function loadDeviceHealth() {
+  const deviceId = document.getElementById('deviceId').value;
+  const status = document.getElementById('status');
+
+  if (!deviceId) {
+    status.textContent = 'Error: Device ID required';
+    return;
+  }
+
+  status.textContent = 'Loading device health...';
+
+  try {
+    const url = `${BASE}/api/device-health?device_id=${encodeURIComponent(deviceId)}&days=7`;
+    const res = await fetch(url);
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`HTTP ${res.status}: ${err}`);
+    }
+
+    const health = await res.json();
+
+    if (health.error) {
+      throw new Error(health.error);
+    }
+
+    renderDeviceHealth(health);
+    renderBootTimeline(health.boot_events, health.data_gaps);
+    renderWiFiChart(health);
+
+    status.textContent = 'Device health loaded @ ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    status.textContent = 'Error: ' + e.message;
+  }
+}
+
+function renderDeviceHealth(health) {
+  const devStatus = document.getElementById('devStatus');
+  const devLastContact = document.getElementById('devLastContact');
+  const devUptime = document.getElementById('devUptime');
+  const devUptimePercent = document.getElementById('devUptimePercent');
+  const devBootCount = document.getElementById('devBootCount');
+  const devLastBoot = document.getElementById('devLastBoot');
+  const devSignal = document.getElementById('devSignal');
+  const devSignalStats = document.getElementById('devSignalStats');
+
+  // Status and last contact
+  const lastContact = health.last_contact;
+  const statusClass = lastContact.status === 'online' ? 'uptime-high' : 'uptime-low';
+  devStatus.textContent = lastContact.status.toUpperCase();
+  devStatus.className = statusClass;
+  devLastContact.textContent = lastContact.age_seconds < 300
+    ? 'Just now'
+    : (lastContact.age_seconds < 3600 ? Math.floor(lastContact.age_seconds / 60) + ' mins ago' : Math.floor(lastContact.age_seconds / 3600) + ' hrs ago');
+
+  // Uptime
+  const uptimeHours = Math.floor(health.total_uptime_seconds / 3600);
+  const uptimeMins = Math.floor((health.total_uptime_seconds % 3600) / 60);
+  devUptime.textContent = uptimeHours + 'h ' + uptimeMins + 'm';
+  devUptimePercent.textContent = health.uptime_percent + '% uptime';
+
+  // Color code uptime
+  if (health.uptime_percent >= 95) {
+    devUptime.className = 'uptime-high';
+  } else if (health.uptime_percent >= 85) {
+    devUptime.className = 'uptime-medium';
+  } else {
+    devUptime.className = 'uptime-low';
+  }
+
+  // Boot count
+  devBootCount.textContent = health.total_boots;
+  if (health.boot_events.length > 0) {
+    const lastBoot = health.boot_events[health.boot_events.length - 1];
+    devLastBoot.textContent = 'Last: ' + new Date(lastBoot.boot_ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  } else {
+    devLastBoot.textContent = 'No boots recorded';
+  }
+
+  // WiFi signal
+  const signal = health.wifi_signal_stats;
+  devSignal.textContent = signal.avg_rssi + ' dBm';
+
+  // Color code signal
+  if (signal.avg_rssi > -70) {
+    devSignal.className = 'uptime-high';
+  } else if (signal.avg_rssi > -80) {
+    devSignal.className = 'uptime-medium';
+  } else {
+    devSignal.className = 'uptime-low';
+  }
+
+  devSignalStats.textContent = 'Range: ' + signal.min_rssi + ' to ' + signal.max_rssi + ' dBm';
+}
+
+function renderBootTimeline(boots, gaps) {
+  if (timelineView === 'visual') {
+    renderTimelineVisual(boots, gaps);
+  } else {
+    renderEventLog(boots, gaps);
+  }
+}
+
+function renderTimelineVisual(boots, gaps) {
+  const container = document.getElementById('deviceTimeline');
+  if (!container) return;
+
+  const html = `
+    <div style="font-size: 0.85rem; padding: 0.5rem;">
+      <div style="display: flex; align-items: center; margin-bottom: 1rem;">
+        <div style="flex: 1;">
+          <div style="display: flex; height: 30px; background: var(--border); border-radius: 0.25rem; overflow: hidden; position: relative;">
+            ${boots.map((boot, idx) => {
+              const prevEnd = idx === 0 ? boots[0].boot_ts : boots[idx - 1].last_activity;
+              const bootStart = new Date(boot.boot_ts);
+              const bootEnd = new Date(boot.last_activity);
+              const percent = ((bootEnd - bootStart) / (new Date(boots[boots.length - 1].last_activity) - new Date(boots[0].boot_ts))) * 100;
+              return `<div style="background: #22c55e; flex: ${percent}; position: relative; border-right: 1px solid var(--bg);" title="Boot ${idx + 1}: ${bootStart.toLocaleString()}"></div>`;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+      <div style="font-size: 0.75rem; color: var(--muted);">
+        <strong>Boots:</strong> ${boots.length} · <strong>Gaps:</strong> ${gaps.length}
+      </div>
+    </div>
+  `;
+  container.innerHTML = html;
+}
+
+function renderEventLog(boots, gaps) {
+  const container = document.getElementById('deviceEventLog');
+  if (!container) return;
+
+  // Combine and sort all events
+  const events = [
+    ...boots.map(b => ({ type: 'boot', data: b })),
+    ...gaps.map(g => ({ type: 'gap', data: g }))
+  ].sort((a, b) => {
+    const aTime = a.type === 'boot' ? a.data.boot_ts : a.data.start;
+    const bTime = b.type === 'boot' ? b.data.boot_ts : b.data.start;
+    return new Date(aTime) - new Date(bTime);
+  });
+
+  const html = `
+    <table style="width: 100%; font-size: 0.85rem; border-collapse: collapse;">
+      <thead>
+        <tr style="border-bottom: 1px solid var(--border);">
+          <th style="text-align: left; padding: 0.5rem; color: var(--muted); font-weight: 500;">Time</th>
+          <th style="text-align: left; padding: 0.5rem; color: var(--muted); font-weight: 500;">Event</th>
+          <th style="text-align: left; padding: 0.5rem; color: var(--muted); font-weight: 500;">Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${events.map(event => {
+          if (event.type === 'boot') {
+            const b = event.data;
+            return `<tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.5rem;">${new Date(b.boot_ts).toLocaleString()}</td>
+              <td style="padding: 0.5rem;"><span style="color: #22c55e;">●</span> Boot</td>
+              <td style="padding: 0.5rem; font-size: 0.75rem; color: var(--muted);">${b.samples_count} samples</td>
+            </tr>`;
+          } else {
+            const g = event.data;
+            const mins = Math.floor(g.duration_seconds / 60);
+            const secs = g.duration_seconds % 60;
+            return `<tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.5rem;">${new Date(g.start).toLocaleString()}</td>
+              <td style="padding: 0.5rem;"><span style="color: #ef4444;">●</span> Gap</td>
+              <td style="padding: 0.5rem; font-size: 0.75rem; color: var(--muted);">${mins}m ${secs}s</td>
+            </tr>`;
+          }
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+  container.innerHTML = html;
+}
+
+function toggleTimelineView(view) {
+  timelineView = view;
+
+  const btnVisual = document.getElementById('btnTimelineVisual');
+  const btnList = document.getElementById('btnTimelineList');
+  const timeline = document.getElementById('deviceTimeline');
+  const eventLog = document.getElementById('deviceEventLog');
+
+  if (view === 'visual') {
+    btnVisual.classList.add('active');
+    btnList.classList.remove('active');
+    timeline.hidden = false;
+    eventLog.hidden = true;
+  } else {
+    btnVisual.classList.remove('active');
+    btnList.classList.add('active');
+    timeline.hidden = true;
+    eventLog.hidden = false;
+  }
+}
+
+function renderWiFiChart(health) {
+  // This is a placeholder - WiFi data points would come from aggregating raw samples
+  // For now, show just the stats
+  const container = document.getElementById('wifiChart');
+  if (!container) return;
+
+  const stats = health.wifi_signal_stats;
+  const html = `
+    <div style="padding: 1rem; text-align: center;">
+      <div style="font-size: 1.25rem; color: var(--accent); font-weight: 700; margin-bottom: 0.5rem;">
+        ${stats.avg_rssi} dBm
+      </div>
+      <div style="font-size: 0.85rem; color: var(--muted);">
+        Average WiFi Signal Strength
+      </div>
+      <div style="margin-top: 1rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; font-size: 0.8rem;">
+        <div>
+          <div style="color: var(--muted);">Min</div>
+          <div style="color: var(--text);">${stats.min_rssi} dBm</div>
+        </div>
+        <div>
+          <div style="color: var(--muted);">Max</div>
+          <div style="color: var(--text);">${stats.max_rssi} dBm</div>
+        </div>
+      </div>
+      <div style="margin-top: 1rem; font-size: 0.75rem; color: var(--muted);">
+        ${stats.samples_with_signal} measurements
+      </div>
+    </div>
+  `;
+  container.innerHTML = html;
+}
 
 function initCharts() {
   const shared = {responsive:true,animation:{duration:300},scales:{
@@ -512,37 +1092,113 @@ function initCharts() {
   });
 }
 
+function populateChartsAggregated(rows) {
+  // For aggregated data, show avg with min/max bands
+  const labels = rows.map(r=> new Date(r.ts_ms).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}));
+
+  // Motion chart with min/max bands
+  motionChart.data.labels = labels;
+  motionChart.data.datasets[0].label = 'Motion Avg';
+  motionChart.data.datasets[0].data = rows.map(r=>r.motion_score_avg);
+  motionChart.data.datasets[0].borderColor = '#38bdf8';
+  motionChart.data.datasets[0].pointRadius = 2;
+  motionChart.data.datasets[0].fill = '+1'; // Fill to next dataset
+
+  // Min/max band for motion (visual only, stacked dataset)
+  motionChart.data.datasets[1].label = 'Motion Range';
+  motionChart.data.datasets[1].data = rows.map(r=>r.motion_score_max - r.motion_score_min);
+  motionChart.data.datasets[1].borderColor = 'transparent';
+  motionChart.data.datasets[1].backgroundColor = 'rgba(56, 189, 248, 0.2)';
+  motionChart.data.datasets[1].fill = true;
+  motionChart.data.datasets[1].pointRadius = 0;
+  motionChart.data.datasets[1].hidden = false;
+
+  motionChart.update('none');
+
+  // Accelerometer chart with min/max bands
+  accelChart.data.labels = labels;
+  accelChart.data.datasets[0].data = rows.map(r=>r.ax_avg);
+  accelChart.data.datasets[0].pointRadius = 2;
+  accelChart.data.datasets[1].data = rows.map(r=>r.ay_avg);
+  accelChart.data.datasets[1].pointRadius = 2;
+  accelChart.data.datasets[2].data = rows.map(r=>r.az_avg);
+  accelChart.data.datasets[2].pointRadius = 2;
+
+  accelChart.update('none');
+}
+
+function populateChartsRaw(rows) {
+  // For raw data, show motion score with 10s average
+  const labels = rows.map(r=> new Date(r.ts_ms).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}));
+  motionChart.data.labels = labels;
+  motionChart.data.customStateArray = rows.map(r=>r.state);
+  motionChart.data.datasets[0].label = 'Motion Score';
+  motionChart.data.datasets[0].data = rows.map(r=>r.motion_score);
+  motionChart.data.datasets[0].borderColor = '#38bdf8';
+  motionChart.data.datasets[0].pointRadius = 0;
+  motionChart.data.datasets[0].fill = false;
+
+  motionChart.data.datasets[1].label = '10s Avg Motion';
+  motionChart.data.datasets[1].data = rows.map(r=>r.motion_avg || null);
+  motionChart.data.datasets[1].borderColor = '#f59e0b';
+  motionChart.data.datasets[1].hidden = false;
+  motionChart.data.datasets[1].pointRadius = 0;
+  motionChart.data.datasets[1].fill = false;
+
+  motionChart.update('none');
+
+  accelChart.data.labels = labels;
+  accelChart.data.datasets[0].data = rows.map(r=>r.ax);
+  accelChart.data.datasets[0].pointRadius = 0;
+  accelChart.data.datasets[1].data = rows.map(r=>r.ay);
+  accelChart.data.datasets[1].pointRadius = 0;
+  accelChart.data.datasets[2].data = rows.map(r=>r.az);
+  accelChart.data.datasets[2].pointRadius = 0;
+  accelChart.update('none');
+}
 
 function switchTab(tab) {
   currentTab = tab;
   const isLive = (tab === 'live');
   const isMl = (tab === 'ml');
-  
+  const isDevice = (tab === 'device');
+
   document.getElementById('tabHist').classList.toggle('active', tab === 'hist');
   document.getElementById('tabLive').classList.toggle('active', isLive);
   document.getElementById('tabMl').classList.toggle('active', isMl);
-  
-  document.getElementById('fieldSince').classList.toggle('hidden', isLive);
-  document.getElementById('fieldUntil').classList.toggle('hidden', isLive);
-  document.getElementById('fieldState').classList.toggle('hidden', isLive);
-  
+  document.getElementById('tabDevice').classList.toggle('active', isDevice);
+
+  document.getElementById('fieldFrom').classList.toggle('hidden', isLive || isDevice);
+  document.getElementById('fieldTo').classList.toggle('hidden', isLive || isDevice);
+  document.getElementById('fieldState').classList.toggle('hidden', isLive || isDevice);
+  document.getElementById('fieldAggregate').classList.toggle('hidden', isLive || isDevice);
+
   const dlBtn = document.getElementById('btnDownload');
-  if(dlBtn) dlBtn.classList.toggle('hidden', isLive || isMl);
-  
+  if(dlBtn) dlBtn.classList.toggle('hidden', isLive || isMl || isDevice);
+
   document.getElementById('fieldRefresh').classList.toggle('hidden', !isLive);
-  
+
   const mlCtrl = document.getElementById('mlControls');
   if(mlCtrl) mlCtrl.classList.toggle('hidden', !isMl);
-  
-  document.getElementById('btnLoad').classList.toggle('hidden', isMl);
-  
+
+  const devCtrl = document.getElementById('deviceControls');
+  if(devCtrl) devCtrl.classList.toggle('hidden', !isDevice);
+
+  document.getElementById('btnLoad').classList.toggle('hidden', isMl || isDevice);
+
   const modePill = document.getElementById('modePill');
-  modePill.textContent = isLive ? 'LIVE' : (isMl ? 'ML TRAINING' : 'Historical');
+  modePill.textContent = isLive ? 'LIVE' : (isMl ? 'ML TRAINING' : (isDevice ? 'DEVICE INFO' : 'Historical'));
   modePill.classList.toggle('live', isLive);
 
   if (isLive) {
     loadData();
     resetRefreshTimer();
+  } else if (isDevice) {
+    if (refreshInterval) {
+      clearInterval(refreshInterval);
+      refreshInterval = null;
+    }
+    loadDeviceHealth();
   } else {
     if (refreshInterval) {
       clearInterval(refreshInterval);
@@ -620,7 +1276,7 @@ async function applyLabel() {
        if (!res.ok) throw new Error("Failed to label");
        
        clearSelection();
-       updateStats(window.loadedRows);
+       updateStats(window.loadedRows, window.isAggregatedData);
        document.getElementById('status').textContent = 'Successfully labelled ' + rowKeys.length + ' samples.';
    } catch (e) {
        document.getElementById('status').textContent = 'Label Error: ' + e.message;
@@ -646,57 +1302,92 @@ function downloadLabelledCSV() {
    window.URL.revokeObjectURL(url);
 }
 
-function updateStats(rows) {
+function updateStats(rows, isAggregated) {
     if(!rows || !rows.length) return;
-    document.getElementById('statTotal').textContent = rows.length;
-    const motions = rows.map(r=>r.motion_score);
-    const avg = motions.reduce((a,b)=>a+b,0)/motions.length;
-    document.getElementById('statMotionAvg').textContent = avg.toFixed(1);
-    document.getElementById('statMotionMax').textContent = Math.max(...motions).toFixed(1);
-    const running = rows.filter(r=>(r.overall_state||r.state)==='RUNNING').length;
-    document.getElementById('statRunning').textContent = (running/rows.length*100).toFixed(1)+'%';
 
-    if (document.getElementById('statUnlabelled')) {
-       const unlabelled = rows.filter(r=>!r.sub_state).length;
-       document.getElementById('statUnlabelled').textContent = unlabelled;
+    if (isAggregated) {
+        // Handle aggregated data
+        const totalSamples = rows.reduce((sum, r) => sum + (r.sample_count || 0), 0);
+        document.getElementById('statTotal').textContent = totalSamples;
+
+        // Max motion: highest max across all buckets
+        const maxMotions = rows.map(r => r.motion_score_max);
+        document.getElementById('statMotionMax').textContent = Math.max(...maxMotions).toFixed(1);
+
+        // Avg motion: average of all motion_score_avg values
+        const avgMotions = rows.map(r => r.motion_score_avg);
+        const overallAvg = avgMotions.reduce((a,b)=>a+b,0) / avgMotions.length;
+        document.getElementById('statMotionAvg').textContent = overallAvg.toFixed(1);
+
+        // Running %: weighted average
+        let totalRunningCount = 0;
+        rows.forEach(r => {
+            const runningInBucket = (r.running_percent || 0) * (r.sample_count || 0) / 100;
+            totalRunningCount += runningInBucket;
+        });
+        const runningPercent = totalSamples > 0 ? (totalRunningCount / totalSamples * 100) : 0;
+        document.getElementById('statRunning').textContent = runningPercent.toFixed(1) + '%';
+
+        // Unlabelled: sum of empty sub_state across buckets
+        if (document.getElementById('statUnlabelled')) {
+            const unlabelledCount = rows.reduce((sum, r) => sum + (r.sub_state_modes[''] || 0), 0);
+            document.getElementById('statUnlabelled').textContent = unlabelledCount;
+        }
+    } else {
+        // Handle raw data (original logic)
+        document.getElementById('statTotal').textContent = rows.length;
+        const motions = rows.map(r=>r.motion_score);
+        const avg = motions.reduce((a,b)=>a+b,0)/motions.length;
+        document.getElementById('statMotionAvg').textContent = avg.toFixed(1);
+        document.getElementById('statMotionMax').textContent = Math.max(...motions).toFixed(1);
+        const running = rows.filter(r=>(r.overall_state||r.state)==='RUNNING').length;
+        document.getElementById('statRunning').textContent = (running/rows.length*100).toFixed(1)+'%';
+
+        if (document.getElementById('statUnlabelled')) {
+           const unlabelled = rows.filter(r=>!r.sub_state).length;
+           document.getElementById('statUnlabelled').textContent = unlabelled;
+        }
     }
 
-    // Update last received timestamp and device status
+    // Update last received timestamp and device status (works for both raw and aggregated)
     if (rows.length > 0) {
+        // For aggregated data, we don't have received_at, so skip device status
         const lastRow = rows[rows.length - 1];
-        const lastReceivedTime = new Date(lastRow.received_at);
-        const formattedTime = lastReceivedTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-        document.getElementById('statLastReceived').textContent = formattedTime;
+        if (lastRow.received_at) {
+            const lastReceivedTime = new Date(lastRow.received_at);
+            const formattedTime = lastReceivedTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+            document.getElementById('statLastReceived').textContent = formattedTime;
 
-        // Update device status with hysteresis to prevent flipping
-        const now = new Date();
-        const ageMs = now - lastReceivedTime;
-        const ageMins = ageMs / 60000;
-        const dot = document.getElementById('statusDot');
-        const statusText = document.getElementById('statusText');
+            // Update device status with hysteresis to prevent flipping
+            const now = new Date();
+            const ageMs = now - lastReceivedTime;
+            const ageMins = ageMs / 60000;
+            const dot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
 
-        let newStatus = lastKnownStatus; // Keep previous status by default
+            let newStatus = lastKnownStatus; // Keep previous status by default
 
-        // Go online if fresh data (< 5 mins)
-        if (ageMins < 5) {
-            newStatus = 'online';
-        }
-        // Go offline only if stale (> 10 mins)
-        else if (ageMins > 10) {
-            newStatus = 'offline';
-        }
+            // Go online if fresh data (< 5 mins)
+            if (ageMins < 5) {
+                newStatus = 'online';
+            }
+            // Go offline only if stale (> 10 mins)
+            else if (ageMins > 10) {
+                newStatus = 'offline';
+            }
 
-        // Update UI only if status changed
-        if (newStatus !== lastKnownStatus) {
-            lastKnownStatus = newStatus;
-            if (newStatus === 'online') {
-                dot.style.background = '#22c55e';
-                statusText.textContent = 'Online';
-                statusText.style.color = '#22c55e';
-            } else {
-                dot.style.background = '#ef4444';
-                statusText.textContent = 'Offline';
-                statusText.style.color = '#ef4444';
+            // Update UI only if status changed
+            if (newStatus !== lastKnownStatus) {
+                lastKnownStatus = newStatus;
+                if (newStatus === 'online') {
+                    dot.style.background = '#22c55e';
+                    statusText.textContent = 'Online';
+                    statusText.style.color = '#22c55e';
+                } else {
+                    dot.style.background = '#ef4444';
+                    statusText.textContent = 'Offline';
+                    statusText.style.color = '#ef4444';
+                }
             }
         }
     }
@@ -706,15 +1397,17 @@ function buildQuery() {
   const p = new URLSearchParams();
   const d = document.getElementById('deviceId').value;
   if(d) p.set('device_id', d);
-  
+
   if (currentTab === 'live') {
     const oneHrAgo = new Date(Date.now() - 3600 * 1000);
-    p.set('since', oneHrAgo.toISOString());
+    p.set('from', oneHrAgo.toISOString());
   } else {
-    const s = document.getElementById('since').value;
-    if(s) p.set('since', new Date(s).toISOString());
-    const u = document.getElementById('until').value;
-    if(u) p.set('until', new Date(u).toISOString());
+    const f = document.getElementById('from').value;
+    if(f) p.set('from', new Date(f).toISOString());
+    const t = document.getElementById('to').value;
+    if(t) p.set('to', new Date(t).toISOString());
+    const agg = document.getElementById('aggregateLevel').value;
+    if(agg) p.set('aggregate', agg);
   }
 
   const st = document.getElementById('stateFilter').value;
@@ -734,7 +1427,7 @@ async function loadData() {
     q.set('format','json');
     const url = BASE + '/api/samples?' + q;
     const res = await fetch(url);
-    
+
     if (!res.ok) {
        const text = await res.text();
        throw new Error(`HTTP ${res.status}: ${text}`);
@@ -742,31 +1435,28 @@ async function loadData() {
 
     const data = await res.json();
     const rows = data.samples || [];
+    const isAggregated = data.aggregated === true;
+
     rows.reverse();
     window.loadedRows = rows;
+    window.isAggregatedData = isAggregated;
 
-    updateStats(rows);
+    updateStats(rows, isAggregated);
 
-    st.textContent = rows.length + ' samples loaded @ ' + new Date().toLocaleTimeString();
+    let sampleLabel = isAggregated ? 'buckets' : 'samples';
+    st.textContent = rows.length + ' ' + sampleLabel + ' loaded @ ' + new Date().toLocaleTimeString();
 
     if (currentTab === 'live') {
       const rate = document.getElementById('refreshRate').value / 1000;
       st.textContent += ' (Next refresh in ' + rate + 's)';
     }
 
-    // charts
-    const labels = rows.map(r=> new Date(r.ts_ms).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}));
-    motionChart.data.labels = labels;
-    motionChart.data.customStateArray = rows.map(r=>r.state);
-    motionChart.data.datasets[0].data = rows.map(r=>r.motion_score);
-    motionChart.data.datasets[1].data = rows.map(r=>r.motion_avg || null);
-    motionChart.update('none'); // Update without animation for smoothness
-
-    accelChart.data.labels = labels;
-    accelChart.data.datasets[0].data = rows.map(r=>r.ax);
-    accelChart.data.datasets[1].data = rows.map(r=>r.ay);
-    accelChart.data.datasets[2].data = rows.map(r=>r.az);
-    accelChart.update('none');
+    // Populate charts based on data type
+    if (isAggregated) {
+      populateChartsAggregated(rows);
+    } else {
+      populateChartsRaw(rows);
+    }
   } catch(e) {
     st.textContent = 'Error: '+e.message;
   } finally {
