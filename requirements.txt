@@ -1,0 +1,14 @@
+# Azure Backend Dependencies
+azure-functions==1.20.0
+azure-data-tables==12.14.0
+
+# Data Science & ML
+pandas==2.1.4
+numpy==1.24.3
+scikit-learn==1.3.2
+joblib==1.3.2
+matplotlib==3.8.2
+
+# Optional: For advanced ML features
+# tensorflow==2.14.0
+# tensorflow-lite==2.14.0
