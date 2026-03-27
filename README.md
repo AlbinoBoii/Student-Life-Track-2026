@@ -131,6 +131,68 @@ The **Dra-Washer Monitor** is a four-part system:
 - **Azure account** (for cloud backend)
 - **Python 3.8+** (for ML training)
 
+---
+
+## ⚙️ Configuration Files (Create These Before Deployment)
+
+### 1. ESP32 Secrets File
+Create `washer_monitor/secrets.h` with your WiFi and API credentials. The firmware is configured for **Enterprise WiFi (PEAP)** (common in university campuses like NUS).
+
+```cpp
+#pragma once
+
+// WiFi Configuration (Enterprise / PEAP)
+#define WIFI_SSID     "your_wifi_name"
+#define EAP_IDENTITY  "your_student_id@domain.edu"
+#define EAP_USERNAME  "your_student_id@domain.edu"
+#define EAP_PASSWORD  "your_portal_password"
+
+// Azure Function API
+#define AZURE_FUNCTION_URL "https://your-function.azurewebsites.net/api/ingest"
+#define AZURE_API_KEY      "your-random-api-key-here"
+
+// Telegram Notifications (Optional)
+#define BOT_TOKEN "your_telegram_bot_token"
+#define CHAT_ID   "your_telegram_chat_id"
+```
+
+> [!WARNING]
+> These files are listed in `.gitignore` to prevent them from being committed to GitHub. However, they remain in your local folder. **Before zipping or sharing your project folder, ensure these files are removed!**
+
+**Where to get these:**
+- **WIFI_SSID/WIFI_PASSWORD**: Your home/dorm WiFi credentials
+- **API_ENDPOINT**: Deployed Azure Function URL (you'll get this after Step 1 below)
+- **INGEST_API_KEY**: Create a strong random string (e.g., `openssl rand -hex 32`)
+- **TELEGRAM_BOT_TOKEN/CHAT_ID**: Optional - get from @BotFather on Telegram
+
+### 2. Azure Functions Local Settings
+Create `Azure/local.settings.json` for local development (excluded from git):
+
+```json
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "DefaultEndpointsProtocol=https;AccountName=yourstorageaccount;AccountKey=your-account-key;EndpointSuffix=core.windows.net",
+    "AZURE_STORAGE_CONNECTION_STRING": "DefaultEndpointsProtocol=https;AccountName=yourstorageaccount;AccountKey=your-account-key;EndpointSuffix=core.windows.net",
+    "INGEST_API_KEY": "your-strong-random-api-key-here",
+    "FUNCTIONS_WORKER_RUNTIME": "python"
+  },
+  "Host": {
+    "CORS": "*"
+  }
+}
+```
+
+**Where to get these:**
+- **AccountName**: Your Azure Storage account name
+- **AccountKey**: Primary access key from Storage account → Access keys
+- **AZURE_STORAGE_CONNECTION_STRING**: Full connection string from the same location
+- **INGEST_API_KEY**: Must match the value in `secrets.h` above
+
+**IMPORTANT**: Never commit these files to git. They're already in `.gitignore`.
+
+---
+
 ### Step 1: Deploy Azure Backend
 
 1. **Clone this repository**
@@ -139,15 +201,24 @@ The **Dra-Washer Monitor** is a four-part system:
    cd Student-Life-Track-2026
    ```
 
-2. **Deploy Azure Functions** (`Azure/function_app.py`)
-   - Use Azure CLI or Azure Portal
-   - Create a storage account for Table Storage
-   - Set environment variables:
+2. **Create `Azure/local.settings.json`** (see [Configuration Files](#-configuration-files-create-these-before-deployment) section above)
+
+3. **Deploy Azure Functions** 
+   - Option A: Using Azure CLI
+     ```bash
+     cd Azure
+     az login
+     az functionapp create --resource-group <your-rg> --consumption-plan-location <region> --runtime python --functions-version 4 --name <your-function-name>
+     az functionapp deployment source config-zip --resource-group <your-rg> --name <your-function-name> --src-path function.zip
      ```
-     AZURE_STORAGE_CONNECTION_STRING = <your-connection-string>
-     INGEST_API_KEY = <choose-a-strong-secret>
-     ```
-   - Note the function URL: `https://<function-name>.azurewebsites.net`
+   - Option B: Using Azure Portal
+     - Create a Function App resource
+     - Upload the Python code from `Azure/function_app.py`
+     - Set Application Settings with values from `local.settings.json`
+
+4. **Note your Function URL**
+   - It will be: `https://<your-function-name>.azurewebsites.net`
+   - Copy this to `washer_monitor/secrets.h` as `API_ENDPOINT`
 
 ### Step 2: Flash ESP32 Firmware
 
@@ -158,12 +229,12 @@ The **Dra-Washer Monitor** is a four-part system:
 
 2. **Open `washer_monitor/washer_monitor.ino`**
 
-3. **Edit `washer_monitor/config.h`** with your credentials:
+3. **Edit `washer_monitor/secrets.h`** with your credentials:
    ```cpp
-   #define WIFI_SSID "Your_WiFi_Name"
-   #define WIFI_PASSWORD "Your_Password"
-   #define API_ENDPOINT "https://<function-name>.azurewebsites.net/api/ingest"
-   #define INGEST_API_KEY "your-api-key-from-above"
+   #define WIFI_SSID      "Your_WiFi_Name"
+   #define EAP_PASSWORD   "Your_Password"
+   #define AZURE_FUNCTION_URL "https://<function-name>.azurewebsites.net/api/ingest"
+   #define AZURE_API_KEY      "your-api-key-from-above"
    ```
 
 4. **Connect MPU6050 to ESP32:**
